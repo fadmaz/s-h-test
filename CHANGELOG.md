@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-03-05
+### Added
+- Implemented Inverter Heartbeat (ICMP ping) to monitor connectivity.
+- Enhanced Traffic Watchdog to capture ALL IP traffic from Inverter (TCP, UDP, ICMP).
+- Added port 8080 to redirection rules.
+- Explicit discovery logging for each sensor.
+
 ## [1.2.9] - 2026-03-05
 ### Added
 - Implemented Traffic Watchdog (passive sniffer) to monitor inverter network activity and detect target ports.

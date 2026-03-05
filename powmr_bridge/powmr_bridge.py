@@ -8,9 +8,9 @@ import logging
 import os
 import paho.mqtt.client as mqtt
 from datetime import datetime
-from scapy.all import ARP, Ether, sendp, getmacbyip, conf, sniff, IP, TCP
+from scapy.all import ARP, Ether, sendp, getmacbyip, conf, sniff, IP, TCP, ICMP
 
-# Silence Scapy
+# Silence warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
@@ -32,7 +32,7 @@ ROUTER_MAC_MANUAL = os.getenv('ROUTER_MAC', '').strip()
 DEVICE_ID = "powmr_rwb1"
 STATE_TOPIC = f"powmr/{DEVICE_ID}/state"
 
-# Determine best interface
+# Interface detection
 def get_best_iface():
     try:
         import subprocess
@@ -42,17 +42,32 @@ def get_best_iface():
 
 conf.iface = get_best_iface()
 
-# --- WATCHDOG (Packet Sniffer) ---
+# --- WATCHDOG ---
 def watchdog_callback(packet):
-    if packet.haslayer(TCP):
-        src_ip = packet[IP].src
-        dst_port = packet[TCP].dport
-        if src_ip == INVERTER_IP:
-            print(f"[WATCHDOG] Seen packet from Inverter to port {dst_port}")
+    if packet.haslayer(IP):
+        src = packet[IP].src
+        dst = packet[IP].dst
+        if src == INVERTER_IP:
+            proto = "TCP" if packet.haslayer(TCP) else "UDP" if packet.haslayer(UDP) else "ICMP" if packet.haslayer(ICMP) else "OTHER"
+            port = packet[TCP].dport if packet.haslayer(TCP) else ""
+            print(f"[WATCHDOG] Traffic from Inverter: {proto} to {dst} {port}")
 
 def start_watchdog():
-    print("[WATCHDOG] Traffic monitoring active...")
+    print("[WATCHDOG] Monitoring ALL traffic from Inverter...")
     sniff(iface=conf.iface, prn=watchdog_callback, filter=f"ip src {INVERTER_IP}", store=0)
+
+# --- HEARTBEAT ---
+def heartbeat():
+    while True:
+        try:
+            import subprocess
+            res = subprocess.call(["ping", "-c", "1", "-W", "1", INVERTER_IP], stdout=subprocess.DEVNULL)
+            if res == 0:
+                print(f"[HEARTBEAT] Inverter {INVERTER_IP} is ONLINE")
+            else:
+                print(f"[HEARTBEAT] Inverter {INVERTER_IP} is OFFLINE!")
+        except: pass
+        time.sleep(30)
 
 SENSORS = {
     "grid_v": ["Grid Voltage", "V", "voltage", "mdi:transmission-tower"],
@@ -115,7 +130,7 @@ def connect_ha_mqtt():
     except Exception as e: print(f"[HA MQTT ERROR] {e}")
 
 def publish_discovery():
-    print(f"[HA MQTT] Publishing sensor discovery...")
+    print(f"[HA MQTT] Publishing {len(SENSORS)} discovery topics...")
     for key, data in SENSORS.items():
         topic = f"homeassistant/sensor/{DEVICE_ID}/{key}/config"
         payload = {
@@ -195,15 +210,14 @@ async def client_connected(ir, iw):
 
 async def main():
     if INVERTER_IP and ROUTER_IP:
-        # Start ARP Spoofer
-        spoofer = ArpSpoofer(INVERTER_IP, ROUTER_IP, INVERTER_MAC_MANUAL, ROUTER_MAC_MANUAL)
-        threading.Thread(target=spoofer.run, daemon=True).start()
-        # Start Traffic Watchdog
+        # Start Threads
+        threading.Thread(target=ArpSpoofer(INVERTER_IP, ROUTER_IP, INVERTER_MAC_MANUAL, ROUTER_MAC_MANUAL).run, daemon=True).start()
         threading.Thread(target=start_watchdog, daemon=True).start()
+        threading.Thread(target=heartbeat, daemon=True).start()
 
     connect_ha_mqtt()
     proxy_server = await asyncio.start_server(client_connected, '0.0.0.0', LISTEN_PORT)
-    print(f"--- PowMr Bridge 1.2.9 ACTIVE (Port {LISTEN_PORT}) ---")
+    print(f"--- PowMr Bridge 1.3.0 ACTIVE (Port {LISTEN_PORT}) ---")
     try:
         async with proxy_server: await proxy_server.serve_forever()
     except Exception: pass
