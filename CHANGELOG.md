@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-03-05
+### Fixed
+- Switched to `iptables-legacy` for better compatibility with Home Assistant OS.
+- Improved ARP Spoofing reliability using `Ether` frames and `sendp`.
+- Enabled unbuffered Python output (`-u`) for real-time logging.
+- Restored configuration via Home Assistant Add-on options (environment variables).
+
 ## [1.1.7] - 2026-03-05
 ### Added
 - Silenced Scapy library warnings in logs to provide cleaner output.
