@@ -4,22 +4,75 @@ import base64
 import paho.mqtt.client as mqtt
 from datetime import datetime
 import os
+import threading
+import time
+from scapy.all import ARP, send, getmacbyip
 
-# --- НАЛАШТУВАННЯ (Зчитуються з HA Config або використовуються дефолтні) ---
+# --- НАЛАШТУВАННЯ ---
 TARGET_HOST = os.getenv('TARGET_HOST', '8.212.18.157')
 TARGET_PORT = int(os.getenv('TARGET_PORT', 1883))
 LISTEN_PORT = int(os.getenv('LISTEN_PORT', 1883))
 
-# Home Assistant MQTT (Внутрішній брокер зазвичай доступний за цими іменами в контейнері)
 HA_BROKER = os.getenv('MQTT_HOST', 'core-mosquitto') 
 HA_PORT = int(os.getenv('MQTT_PORT', 1883))
 HA_USER = os.getenv('MQTT_USER', '')
 HA_PASS = os.getenv('MQTT_PASSWORD', '')
 
+INVERTER_IP = os.getenv('INVERTER_IP', '')
+ROUTER_IP = os.getenv('ROUTER_IP', '')
+AUTO_INTERCEPT = os.getenv('AUTO_INTERCEPT', 'true').lower() == 'true'
+
 DEVICE_ID = "powmr_rwb1"
 STATE_TOPIC = f"powmr/{DEVICE_ID}/state"
 
-# --- СЛОВНИК УСІХ СЕНСОРІВ ---
+# --- ARP SPOOFER ---
+class ArpSpoofer:
+    def __init__(self, target_ip, gateway_ip):
+        self.target_ip = target_ip
+        self.gateway_ip = gateway_ip
+        self.running = False
+
+    def get_mac(self, ip):
+        print(f"[ARP] Пошук MAC-адреси для {ip}...")
+        mac = getmacbyip(ip)
+        if not mac:
+            print(f"[ARP] !!! НЕ ВДАЛОСЯ ЗНАЙТИ MAC для {ip}. Перевірте підключення.")
+        return mac
+
+    def restore_network(self, target_mac, gateway_mac):
+        print("[ARP] Відновлення оригінальних маршрутів мережі...")
+        send(ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, 
+                 hwdst="ff:ff:ff:ff:ff:ff", hwsrc=gateway_mac), count=5, verbose=False)
+        send(ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, 
+                 hwdst="ff:ff:ff:ff:ff:ff", hwsrc=target_mac), count=5, verbose=False)
+
+    def run(self):
+        target_mac = self.get_mac(self.target_ip)
+        gateway_mac = self.get_mac(self.gateway_ip)
+
+        if not target_mac or not gateway_mac:
+            print("[ARP] Помилка ініціалізації ARP. Перехоплення скасовано.")
+            return
+
+        self.running = True
+        print(f"[ARP] Перехоплення активовано для {self.target_ip} (MAC: {target_mac})")
+        
+        try:
+            while self.running:
+                # Маскуємось під роутер для інвертора
+                send(ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst=target_mac), verbose=False)
+                # Маскуємось під інвертор для роутера
+                send(ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst=gateway_mac), verbose=False)
+                time.sleep(2)
+        except Exception as e:
+            print(f"[ARP] Помилка у потоці: {e}")
+        finally:
+            self.restore_network(target_mac, gateway_mac)
+
+    def stop(self):
+        self.running = False
+
+# --- SENSORS & MQTT (Ідентично попередній версії) ---
 SENSORS = {
     "grid_v": ["Grid Voltage", "V", "voltage", "mdi:transmission-tower"],
     "grid_hz": ["Grid Frequency", "Hz", "frequency", "mdi:current-ac"],
@@ -54,10 +107,9 @@ def connect_ha_mqtt():
         print(f"[HA MQTT] Підключено до брокера {HA_BROKER}")
         publish_discovery()
     except Exception as e:
-        print(f"[HA MQTT] Помилка підключення: {e}. Спробуємо пізніше...")
+        print(f"[HA MQTT] Помилка підключення: {e}")
 
 def publish_discovery():
-    print("[HA MQTT] Відправка конфігурації Auto-Discovery...")
     for key, data in SENSORS.items():
         topic = f"homeassistant/sensor/{DEVICE_ID}/{key}/config"
         payload = {
@@ -70,9 +122,9 @@ def publish_discovery():
             "unique_id": f"{DEVICE_ID}_{key}",
             "device": {
                 "identifiers": [DEVICE_ID],
-                "name": "PowMr 6.2kW Inverter",
+                "name": "PowMr Inverter",
                 "manufacturer": "PowMr",
-                "model": "RWB1 6200W"
+                "model": "RWB1"
             }
         }
         ha_client.publish(topic, json.dumps(payload), retain=True)
@@ -83,13 +135,10 @@ class SolarParser:
         try:
             start = payload_bytes.find(b'{')
             if start == -1: return
-
             raw_json = json.loads(payload_bytes[start:].decode('utf-8', errors='ignore'))
             state = {}
-
             if "b" in raw_json and "ct" in raw_json["b"]:
                 blocks = {item["cn"]: base64.b64decode(item["co"]) for item in raw_json["b"]["ct"]}
-
                 if "PS4Z" in blocks:
                     r = blocks["PS4Z"]
                     if len(r) >= 44:
@@ -105,12 +154,10 @@ class SolarParser:
                         state["pv_v"] = int.from_bytes(r[39:41], 'little') / 10.0
                         pv_w = int.from_bytes(r[41:43], 'little')
                         state["pv_w"] = pv_w if pv_w < 6500 else 0
-                        
                         if state["grid_v"] < 100 and state["load_w"] > 0:
                             state["dischg_current"] = round((state["load_w"] / state["bat_v"]), 1)
                         else:
                             state["dischg_current"] = 0
-
                 if "Sgx0" in blocks:
                     r = blocks["Sgx0"]
                     if len(r) >= 42:
@@ -122,11 +169,9 @@ class SolarParser:
                         state["cut_v"] = int.from_bytes(r[27:29], 'little') / 10.0
                         state["sbu_return_bat"] = int.from_bytes(r[29:31], 'little') / 10.0
                         state["bat_temp"] = r[41]
-
             if state:
                 ha_client.publish(STATE_TOPIC, json.dumps(state))
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Дані відправлено: {len(state)} параметрів.")
-                
         except Exception as e:
             print(f"Помилка парсингу: {e}")
 
@@ -150,11 +195,25 @@ async def client_connected(ir, iw):
     finally: iw.close()
 
 async def main():
+    spoofer = None
+    if AUTO_INTERCEPT and INVERTER_IP and ROUTER_IP:
+        spoofer = ArpSpoofer(INVERTER_IP, ROUTER_IP)
+        arp_thread = threading.Thread(target=spoofer.run, daemon=True)
+        arp_thread.start()
+        print("[System] ARP Spoofing активовано.")
+
     connect_ha_mqtt()
     proxy_server = await asyncio.start_server(client_connected, '0.0.0.0', LISTEN_PORT)
     print(f"--- PowMr HA Bridge Запущено (Порт: {LISTEN_PORT}) ---")
-    async with proxy_server:
-        await proxy_server.serve_forever()
+    
+    try:
+        async with proxy_server:
+            await proxy_server.serve_forever()
+    except Exception as e:
+        print(f"Помилка сервера: {e}")
+    finally:
+        if spoofer:
+            spoofer.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())

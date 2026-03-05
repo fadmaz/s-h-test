@@ -1,9 +1,9 @@
 ARG BUILD_FROM=ghcr.io/hassio-addons/base:14.0.0
 FROM $BUILD_FROM
 
-# Install Python and dependencies
-RUN apk add --no-cache python3 py3-pip
-RUN pip3 install paho-mqtt
+# Install dependencies
+RUN apk add --no-cache python3 py3-pip iptables libpcap-dev
+RUN pip3 install paho-mqtt scapy
 
 # Set working directory
 WORKDIR /app

@@ -1,6 +1,6 @@
 name: "PowMr Inverter Bridge"
-description: "Local bridge for PowMr inverters (MQTT interceptor) with Auto-Discovery for Home Assistant."
-version: "1.0.0"
+description: "Local bridge for PowMr inverters with ARP Spoofing Auto-Discovery."
+version: "1.1.0"
 slug: "powmr_bridge"
 init: false
 arch:
@@ -10,14 +10,19 @@ arch:
   - armv7
   - i386
 startup: "application"
-ports:
-  1883/tcp: 1883
 host_network: true
+full_access: true
 options:
   TARGET_HOST: "8.212.18.157"
   TARGET_PORT: 1883
   LISTEN_PORT: 1883
+  INVERTER_IP: "192.168.1.139"
+  ROUTER_IP: "192.168.1.1"
+  AUTO_INTERCEPT: true
 schema:
   TARGET_HOST: str
   TARGET_PORT: int
   LISTEN_PORT: int
+  INVERTER_IP: str
+  ROUTER_IP: str
+  AUTO_INTERCEPT: bool
