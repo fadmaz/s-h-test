@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.2] - 2026-03-05
+### Added
+- Manual MAC address configuration for Inverter and Router in Add-on options.
+- `privileged` mode with `NET_ADMIN` and `NET_RAW` capabilities.
+- `apparmor: false` to allow advanced network operations.
+- Restored SBU configuration sensors (`sbu_return_grid`, `sbu_return_bat`).
+
 ## [1.2.1] - 2026-03-05
 ### Added
 - Detailed network and capability diagnostics in `run.sh`.

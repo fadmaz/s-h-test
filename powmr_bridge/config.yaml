@@ -1,6 +1,6 @@
 name: "PowMr Inverter Bridge"
 description: "Local bridge for PowMr inverters with ARP Spoofing Auto-Discovery."
-version: "1.2.1"
+version: "1.2.2"
 slug: "powmr_bridge"
 init: false
 arch:
@@ -12,12 +12,18 @@ arch:
 startup: "application"
 host_network: true
 full_access: true
+privileged:
+  - NET_ADMIN
+  - NET_RAW
+apparmor: false
 options:
   TARGET_HOST: "8.212.18.157"
   TARGET_PORT: 1883
   LISTEN_PORT: 18899
   INVERTER_IP: "192.168.1.139"
   ROUTER_IP: "192.168.1.1"
+  INVERTER_MAC: ""
+  ROUTER_MAC: ""
   AUTO_INTERCEPT: true
 schema:
   TARGET_HOST: str
@@ -25,4 +31,6 @@ schema:
   LISTEN_PORT: int
   INVERTER_IP: str
   ROUTER_IP: str
+  INVERTER_MAC: str?
+  ROUTER_MAC: str?
   AUTO_INTERCEPT: bool

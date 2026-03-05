@@ -19,7 +19,7 @@ TARGET_HOST = os.getenv('TARGET_HOST', '8.212.18.157')
 TARGET_PORT = int(os.getenv('TARGET_PORT', 1883))
 LISTEN_PORT = int(os.getenv('LISTEN_PORT', 18899))
 
-# --- НАЛАШТУВАННЯ HOME ASSISTANT MQTT ---
+# --- HA MQTT ---
 HA_BROKER = os.getenv('MQTT_HOST', 'core-mosquitto') 
 HA_PORT = int(os.getenv('MQTT_PORT', 1883))
 HA_USER = os.getenv('MQTT_USER', '')
@@ -27,11 +27,12 @@ HA_PASS = os.getenv('MQTT_PASSWORD', '')
 
 INVERTER_IP = os.getenv('INVERTER_IP', '')
 ROUTER_IP = os.getenv('ROUTER_IP', '')
+INVERTER_MAC_MANUAL = os.getenv('INVERTER_MAC', '').strip()
+ROUTER_MAC_MANUAL = os.getenv('ROUTER_MAC', '').strip()
 
 DEVICE_ID = "powmr_rwb1"
 STATE_TOPIC = f"powmr/{DEVICE_ID}/state"
 
-# --- СЛОВНИК СЕНСОРІВ ---
 SENSORS = {
     "grid_v": ["Grid Voltage", "V", "voltage", "mdi:transmission-tower"],
     "grid_hz": ["Grid Frequency", "Hz", "frequency", "mdi:current-ac"],
@@ -50,65 +51,56 @@ SENSORS = {
     "util_chg": ["Utility Charge Current", "A", "current", "mdi:current-dc"],
     "bulk_v": ["Bulk Charging Voltage", "V", "voltage", "mdi:battery-charging-high"],
     "float_v": ["Float Charging Voltage", "V", "voltage", "mdi:battery-charging-medium"],
-    "cut_v": ["Low Battery Cut-off", "V", "voltage", "mdi:battery-off-outline"]
+    "cut_v": ["Low Battery Cut-off", "V", "voltage", "mdi:battery-off-outline"],
+    "sbu_return_grid": ["SBU Return to Grid Volts", "V", "voltage", "mdi:transmission-tower-export"],
+    "sbu_return_bat": ["SBU Return to Battery Volts", "V", "voltage", "mdi:battery-arrow-up"]
 }
 
-# --- ARP SPOOFING ---
 class ArpSpoofer:
-    def __init__(self, target_ip, gateway_ip):
+    def __init__(self, target_ip, gateway_ip, target_mac=None, gateway_mac=None):
         self.target_ip = target_ip     
         self.gateway_ip = gateway_ip   
+        self.target_mac = target_mac
+        self.gateway_mac = gateway_mac
         self.running = False
 
     def get_mac(self, ip):
         mac = getmacbyip(ip)
         if not mac:
-            print(f"[ARP] Не вдалося знайти MAC для IP: {ip}")
+            print(f"[ARP] !!! Не вдалося знайти MAC для IP: {ip}. Спробуйте вказати його вручну в налаштуваннях.")
         return mac
 
-    def restore_network(self, target_mac, gateway_mac):
-        print("\n[ARP] Відновлення оригінальних маршрутів мережі...")
-        if target_mac and gateway_mac:
-            sendp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=gateway_mac), count=5, verbose=False)
-            sendp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst="ff:ff:ff:ff:ff:ff", hwsrc=target_mac), count=5, verbose=False)
-
     def run(self):
-        target_mac = self.get_mac(self.target_ip)
-        gateway_mac = self.get_mac(self.gateway_ip)
+        t_mac = self.target_mac if self.target_mac else self.get_mac(self.target_ip)
+        g_mac = self.gateway_mac if self.gateway_mac else self.get_mac(self.gateway_ip)
 
-        if not target_mac or not gateway_mac:
-            print("[ARP] Перехоплення неможливе. Перевірте IP адреси інвертора та роутера.")
+        if not t_mac or not g_mac:
+            print("[ARP] Перехоплення неможливе. Перевірте MAC адреси.")
             return
 
         self.running = True
-        print(f"[System] ARP Spoofing активовано для інвертора {self.target_ip}")
+        print(f"[System] ARP Spoofing активний: {self.target_ip} -> {t_mac}")
         
         try:
             while self.running:
-                sendp(Ether(dst=target_mac)/ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst=target_mac), verbose=False)
-                sendp(Ether(dst=gateway_mac)/ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst=gateway_mac), verbose=False)
+                sendp(Ether(dst=t_mac)/ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst=t_mac), verbose=False)
+                sendp(Ether(dst=g_mac)/ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst=g_mac), verbose=False)
                 time.sleep(2)
-        except Exception as e:
-            print(f"[ARP] Помилка: {e}")
-        finally:
-            self.restore_network(target_mac, gateway_mac)
+        except Exception as e: print(f"[ARP] Помилка: {e}")
 
-    def stop(self):
-        self.running = False
+    def stop(self): self.running = False
 
 # --- MQTT ДЛЯ HOME ASSISTANT ---
 ha_client = mqtt.Client()
-if HA_USER and HA_PASS:
-    ha_client.username_pw_set(HA_USER, HA_PASS)
+if HA_USER and HA_PASS: ha_client.username_pw_set(HA_USER, HA_PASS)
 
 def connect_ha_mqtt():
     try:
         ha_client.connect(HA_BROKER, HA_PORT, 60)
         ha_client.loop_start()
-        print(f"[HA MQTT] Підключено до брокера {HA_BROKER}")
+        print(f"[HA MQTT] Підключено до {HA_BROKER}")
         publish_discovery()
-    except Exception as e:
-        print(f"[HA MQTT] Помилка підключення до {HA_BROKER}: {e}")
+    except Exception as e: print(f"[HA MQTT] Помилка: {e}")
 
 def publish_discovery():
     for key, data in SENSORS.items():
@@ -125,20 +117,16 @@ def publish_discovery():
         }
         ha_client.publish(topic, json.dumps(payload), retain=True)
 
-# --- ПАРСЕР ---
 class SolarParser:
     @staticmethod
     def parse_payload(payload_bytes):
         try:
             start = payload_bytes.find(b'{')
             if start == -1: return
-
             raw_json = json.loads(payload_bytes[start:].decode('utf-8', errors='ignore'))
             state = {}
-
             if "b" in raw_json and "ct" in raw_json["b"]:
                 blocks = {item["cn"]: base64.b64decode(item["co"]) for item in raw_json["b"]["ct"]}
-
                 if "PS4Z" in blocks:
                     r = blocks["PS4Z"]
                     if len(r) >= 44:
@@ -155,32 +143,28 @@ class SolarParser:
                         pv_w = int.from_bytes(r[41:43], 'little')
                         state["pv_w"] = pv_w if pv_w < 6500 else 0
                         state["dischg_current"] = round((state["load_w"] / state["bat_v"]), 1) if (state["grid_v"] < 100 and state["load_w"] > 0) else 0
-
                 if "Sgx0" in blocks:
                     r = blocks["Sgx0"]
                     if len(r) >= 42:
                         state["max_chg"] = int.from_bytes(r[13:15], 'little')
                         state["util_chg"] = int.from_bytes(r[17:19], 'little')
+                        state["sbu_return_grid"] = int.from_bytes(r[19:21], 'little') / 10.0
                         state["float_v"] = int.from_bytes(r[21:23], 'little') / 10.0
                         state["bulk_v"] = int.from_bytes(r[23:25], 'little') / 10.0
                         state["cut_v"] = int.from_bytes(r[27:29], 'little') / 10.0
+                        state["sbu_return_bat"] = int.from_bytes(r[29:31], 'little') / 10.0
                         state["bat_temp"] = r[41]
-
             if state:
                 ha_client.publish(STATE_TOPIC, json.dumps(state))
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Дані надіслано в HA: {len(state)} параметрів.")
-                
-        except Exception:
-            pass
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ HA: {len(state)} params.")
+        except Exception: pass
 
-# --- PROXY ---
 async def handle_stream(reader, writer, is_inverter):
     try:
         while True:
             data = await reader.read(8192)
             if not data: break
-            if data[0] & 0xF0 == 0x30:
-                SolarParser.parse_payload(data)
+            if data[0] & 0xF0 == 0x30: SolarParser.parse_payload(data)
             writer.write(data)
             await writer.drain()
     except Exception: pass
@@ -195,21 +179,14 @@ async def client_connected(ir, iw):
 
 async def main():
     if INVERTER_IP and ROUTER_IP:
-        spoofer = ArpSpoofer(INVERTER_IP, ROUTER_IP)
+        spoofer = ArpSpoofer(INVERTER_IP, ROUTER_IP, INVERTER_MAC_MANUAL, ROUTER_MAC_MANUAL)
         threading.Thread(target=spoofer.run, daemon=True).start()
 
     connect_ha_mqtt()
     proxy_server = await asyncio.start_server(client_connected, '0.0.0.0', LISTEN_PORT)
-    
-    print(f"--- PowMr Proxy Active на порту {LISTEN_PORT} ---")
+    print(f"--- PowMr Bridge 1.2.2 Active (Port {LISTEN_PORT}) ---")
     try:
-        async with proxy_server:
-            await proxy_server.serve_forever()
-    except Exception as e:
-        print(f"Помилка сервера: {e}")
-    finally:
-        if 'spoofer' in locals():
-            spoofer.stop()
+        async with proxy_server: await proxy_server.serve_forever()
+    except Exception: pass
 
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == "__main__": asyncio.run(main())
