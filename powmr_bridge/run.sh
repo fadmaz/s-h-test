@@ -2,11 +2,8 @@
 
 echo "Initializing PowMr Network Interceptor..."
 
-# 1. Soft attempt to enable IP forwarding
-sysctl -w net.ipv4.ip_forward=1 2>/dev/null || echo "IP forwarding skip (Read-only OS, it's OK)"
-
-# 2. Redirect incoming traffic from 1883 to our local port 18899
-# This avoids conflict with Mosquitto (1883) and WebSockets (1884)
+# Redirect incoming traffic from 1883 to our local port 18899
+# This is safe and doesn't require system-wide IP forwarding
 iptables -t nat -A PREROUTING -p tcp --dport 1883 -j REDIRECT --to-port 18899 || echo "CRITICAL WARNING: iptables failed! You MUST turn OFF Protection Mode in HA Add-on settings."
 
 # Export HA MQTT settings

@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.3] - 2026-03-05
+## [1.1.6] - 2026-03-05
+### Fixed
+- Fatal crash during startup caused by direct writes to `/proc/sys/net/ipv4/ip_forward` on Read-only filesystems in Home Assistant.
+- Removed unnecessary `sysctl` calls as local `REDIRECT` does not require system-wide IP forwarding.
+
+## [1.1.5] - 2026-03-05
+
 ### Fixed
 - Added robust error handling in `run.sh` to prevent crashes on read-only OS filesystems.
 - Added warnings about "Protection Mode" in logs if network redirection fails.
