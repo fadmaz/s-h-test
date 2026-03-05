@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.8] - 2026-03-05
+### Fixed
+- Added `iptables` rule cleanup loop to remove legacy redirection rules on startup.
+- Implemented strict source IP filtering for port redirection to avoid intercepting HA internal traffic.
+- Added verification log for active redirection rules.
+
 ## [1.2.7] - 2026-03-05
 ### Fixed
 - Added `-s $INVERTER_IP` to `iptables` rule to avoid intercepting internal HA traffic.

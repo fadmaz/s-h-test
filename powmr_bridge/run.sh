@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- PowMr Bridge 1.2.7 START ---"
+echo "--- PowMr Bridge 1.2.8 START ---"
 
 # Експорт налаштувань
 export MQTT_HOST=$(bashio::config 'mqtt_host' 'core-mosquitto')
@@ -15,14 +15,23 @@ export ROUTER_IP=$(bashio::config 'ROUTER_IP' '')
 export INVERTER_MAC=$(bashio::config 'INVERTER_MAC' '')
 export ROUTER_MAC=$(bashio::config 'ROUTER_MAC' '')
 
-# Перехоплюємо ТІЛЬКИ пакет від інвертора (-s $INVERTER_IP)
+# 1. ОЧИЩЕННЯ: Видаляємо всі старі правила перенаправлення на наш порт
+echo "Cleaning up old iptables rules..."
+while iptables -t nat -D PREROUTING -p tcp --dport 1883 -j REDIRECT --to-port $LISTEN_PORT 2>/dev/null; do
+    echo "Removed legacy redirection rule."
+done
+
+# 2. ВСТАНОВЛЕННЯ: Тільки для інвертора
 if [ -n "$INVERTER_IP" ]; then
-    echo "Redirecting ONLY traffic from $INVERTER_IP to $LISTEN_PORT..."
-    iptables -t nat -I PREROUTING 1 -s $INVERTER_IP -p tcp --dport 1883 -j REDIRECT --to-port $LISTEN_PORT || echo "WARNING: iptables failed"
+    echo "Setting up surgical redirection for $INVERTER_IP only..."
+    iptables -t nat -I PREROUTING 1 -s $INVERTER_IP -p tcp --dport 1883 -j REDIRECT --to-port $LISTEN_PORT
 else
-    echo "ERROR: INVERTER_IP is not set. Redirection might be too broad!"
-    iptables -t nat -I PREROUTING 1 -p tcp --dport 1883 -j REDIRECT --to-port $LISTEN_PORT
+    echo "CRITICAL ERROR: INVERTER_IP is not set in Add-on options!"
 fi
+
+# 3. ПЕРЕВІРКА: Виводимо поточні правила в лог
+echo "Current active redirection rules:"
+iptables -t nat -L PREROUTING -n -v | grep $LISTEN_PORT || echo "No active redirection rules found!"
 
 echo "Launching Python Bridge..."
 python3 -u /app/powmr_bridge.py
