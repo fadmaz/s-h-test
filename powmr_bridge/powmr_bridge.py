@@ -6,6 +6,10 @@ from datetime import datetime
 import os
 import threading
 import time
+import logging
+
+# Silence Scapy warnings
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 from scapy.all import ARP, send, getmacbyip
 
 # --- НАЛАШТУВАННЯ ---

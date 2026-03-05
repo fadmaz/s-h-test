@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.7] - 2026-03-05
+### Added
+- Silenced Scapy library warnings in logs to provide cleaner output.
+
 ## [1.1.6] - 2026-03-05
 ### Fixed
 - Fatal crash during startup caused by direct writes to `/proc/sys/net/ipv4/ip_forward` on Read-only filesystems in Home Assistant.
