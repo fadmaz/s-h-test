@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.3] - 2026-03-05
+### Fixed
+- Added robust error handling in `run.sh` to prevent crashes on read-only OS filesystems.
+- Added warnings about "Protection Mode" in logs if network redirection fails.
+
 ## [1.1.2] - 2026-03-05
 ### Fixed
 - Docker build failure caused by PEP 668 in modern Alpine Linux (Home Assistant base images).

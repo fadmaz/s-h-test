@@ -1,11 +1,13 @@
 #!/usr/bin/with-contenv bashio
+
 echo "Initializing PowMr Network Interceptor..."
 
-# Enable IP Forwarding (required for ARP spoofing to work)
-echo 1 > /proc/sys/net/ipv4/ip_forward
+# 1. Soft attempt to enable IP forwarding (ignore read-only errors)
+sysctl -w net.ipv4.ip_forward=1 2>/dev/null || echo "IP forwarding skip (Read-only OS, it's OK)"
 
-# Redirect incoming traffic on port 1883 (intercepted from inverter) to our local bridge
-iptables -t nat -A PREROUTING -p tcp --dport 1883 -j REDIRECT --to-port 1883
+# 2. Redirect incoming traffic on port 1883 to our local bridge
+# If this fails, user likely needs to disable Protection Mode in Add-on settings
+iptables -t nat -A PREROUTING -p tcp --dport 1883 -j REDIRECT --to-port 1883 || echo "Warning: iptables failed! Check if Protection Mode is OFF in HA Addon settings."
 
 # Export HA MQTT settings
 export MQTT_HOST=$(bashio::config 'mqtt_host' 'core-mosquitto')
