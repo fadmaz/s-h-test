@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [1.1.1] - 2026-03-05
+### Added
+- English documentation and README.
+- Versioning support for Home Assistant Add-on Store.
+- This CHANGELOG file.
+
+### Fixed
+- Docker build process for Home Assistant OS.
+- Line ending issues (`run.sh` CRLF/LF) causing build failures on Windows-to-Linux deployments.
+- Repository structure to comply with Home Assistant requirements.
+
+## [1.1.0] - 2026-03-05
+### Added
+- ARP Spoofing support for automatic traffic interception.
+- `iptables` redirection logic to capture inverter data without router changes.
+- In-container network management (IP forwarding).
+
+## [1.0.0] - 2026-03-05
+### Added
+- Initial bridge logic for PowMr RWB1 inverters.
+- MQTT Auto-Discovery for Home Assistant sensors.
+- Basic proxy server for Siseli cloud interception.

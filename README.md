@@ -1,62 +1,65 @@
 # ☀️ PowMr Inverter Home Assistant Bridge (Siseli Interceptor)
 
-Цей додаток дозволяє інтегрувати інвертори PowMr (моделі RWB1, 6.2kW та аналогічні) у Home Assistant без використання зовнішніх хмар. Додаток перехоплює MQTT-трафік, який інвертор надсилає в китайську хмару Siseli, розшифровує його та створює сенсори через MQTT Auto-Discovery.
+[![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)](CHANGELOG.md)
+[![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
+
+Integrate PowMr inverters (RWB1, 6.2kW, and similar models) into Home Assistant without external clouds. This bridge intercepts the MQTT traffic sent to the Siseli cloud, decodes it, and creates sensors via MQTT Auto-Discovery.
 
 ---
 
-## 🚀 Швидке встановлення
+## 🚀 Quick Setup
 
-### Крок 1: Підготовка Home Assistant
-Переконайтеся, що у вас встановлено та налаштовано офіційний аддон **Mosquitto Broker**:
-1. Зайдіть у **Settings -> Add-ons -> Add-on Store**.
-2. Встановіть **Mosquitto Broker**.
-3. Запустіть його та створіть користувача для MQTT (якщо ще не зроблено).
+### Step 1: Prepare Home Assistant
+Ensure the official **Mosquitto Broker** add-on is installed and configured:
+1. Go to **Settings -> Add-ons -> Add-on Store**.
+2. Install **Mosquitto Broker**.
+3. Start it and ensure you have an MQTT user created.
 
-### Крок 2: Додавання репозиторію
-1. Скопіюйте посилання на цей репозиторій: `https://github.com/yuraantonov11/siseli-ha`
-2. У Home Assistant перейдіть до **Settings -> Add-ons -> Add-on Store**.
-3. Натисніть на три крапки вгорі праворуч -> **Repositories**.
-4. Вставте посилання та натисніть **Add**.
-5. Після оновлення списку ви побачите новий розділ "Siseli HA" внизу сторінки.
+### Step 2: Add Repository
+1. Copy this repository URL: `https://github.com/yuraantonov11/siseli-ha`
+2. In Home Assistant, go to **Settings -> Add-ons -> Add-on Store**.
+3. Click the three dots in the top right -> **Repositories**.
+4. Paste the URL and click **Add**.
 
-### Крок 3: Встановлення та налаштування додатка
-1. Натисніть на **PowMr Inverter Bridge** та натисніть **Install**.
-2. Після встановлення перейдіть на вкладку **Configuration**.
-3. Заповніть основні поля:
-   * **INVERTER_IP**: Локальна IP-адреса вашого інвертора (наприклад, `192.168.1.139`). Її можна знайти в налаштуваннях вашого роутера.
-   * **ROUTER_IP**: Локальна IP-адреса вашого роутера (наприклад, `192.168.1.1`).
-   * **AUTO_INTERCEPT**: Залиште `true` для використання ARP Spoofing (автоматичне перехоплення).
-4. На вкладці **Info** увімкніть **Watchdog** (для перезапуску у разі помилки) та натисніть **Start**.
-
----
-
-## 🛠 Як це працює (Технічно)
-
-Додаток використовує два методи перехоплення трафіку:
-
-### Варіант А: ARP Spoofing (Рекомендовано)
-Якщо увімкнено `AUTO_INTERCEPT`, додаток кожні 2 секунди надсилає інвертору спеціальні мережеві пакети, переконуючи його, що ваш сервер Home Assistant — це роутер. Інвертор починає надсилати дані на HA замість реального роутера. Додаток розпаршує дані та прозоро пересилає їх далі в хмару Siseli, щоб офіційний мобільний застосунок також продовжував працювати.
-
-### Варіант Б: DNS/IP Redirect (Ручний)
-Ви можете вимкнути ARP Spoofing і налаштувати роутер вручну:
-* Спрямуйте трафік для IP `8.212.18.157` на IP-адресу вашого Home Assistant.
-* Або налаштуйте DNS так, щоб домени хмари Siseli вказували на ваш HA.
+### Step 3: Install & Configure
+1. Find **PowMr Inverter Bridge** in the store and click **Install**.
+2. Go to the **Configuration** tab.
+3. Fill in the required fields:
+   * **INVERTER_IP**: The local IP of your inverter (e.g., `192.168.1.139`).
+   * **ROUTER_IP**: The local IP of your router (e.g., `192.168.1.1`).
+   * **AUTO_INTERCEPT**: Keep `true` to use ARP Spoofing (automatic interception).
+4. Go to the **Info** tab, enable **Watchdog**, and click **Start**.
 
 ---
 
-## 📊 Доступні сенсори
-Після успішного запуску в Home Assistant автоматично з'явиться новий пристрій **"PowMr Inverter"** з наступними сенсорами:
-* Напруга та частота мережі (Grid)
-* Напруга та частота на виході (Load)
-* Навантаження у Ватах (W) та Відсотках (%)
-* Напруга та ємність акумулятора (%)
-* Потужність та напруга сонячних панелей (PV)
-* Температура інвертора
-* Налаштування зарядки (Max charge, Bulk, Float, Cut-off voltage)
+## 🛠 How it Works (Technical)
+
+The add-on uses two methods for traffic interception:
+
+### Option A: ARP Spoofing (Recommended)
+With `AUTO_INTERCEPT` enabled, the add-on sends special network packets every 2 seconds, convincing the inverter that your Home Assistant server is the router. The inverter starts sending data to HA instead of the real router. The bridge parses the data and transparently forwards it to the Siseli cloud, so the official mobile app continues to work.
+
+### Option B: Manual Redirect (Legacy)
+You can disable ARP Spoofing and manually configure your router to redirect traffic for IP `8.212.18.157` to your Home Assistant IP.
 
 ---
 
-## ⚠️ Важливі зауваження
-1. **Статичний IP**: Наполегливо рекомендується призначити статичну IP-адресу вашому інвертору та серверу Home Assistant у налаштуваннях роутера.
-2. **Безпека**: Додаток вимагає `full_access` (привілейований режим) для роботи з мережевими пакетами (ARP Spoofing).
-3. **Відновлення**: При зупинці додатка він автоматично надсилає пакети відновлення, щоб інвертор знову почав працювати через реальний роутер.
+## 📊 Available Sensors
+The following sensors will automatically appear in Home Assistant:
+* Grid Voltage & Frequency
+* Output (Load) Voltage & Frequency
+* Active Load (W) & Percentage (%)
+* Battery Voltage & Capacity (%)
+* PV (Solar) Power & Voltage
+* Inverter Temperature
+* Charging Settings (Max charge, Bulk, Float, Cut-off voltage)
+
+---
+
+## 🇺🇦 Українською (Ukrainian)
+Цей додаток дозволяє інтегрувати інвертори PowMr у Home Assistant без використання зовнішніх хмар. Він перехоплює трафік, що йде до хмари Siseli, та автоматично створює сенсори. Повна інструкція з налаштування доступна в розділі README вище (англійською).
+
+---
+
+## 📄 License
+MIT License. Free to use and modify.
