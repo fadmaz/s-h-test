@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.1] - 2026-03-05
+### Added
+- **Diagnostic Proxy Logging**: Added real-time tracking of data packets between Inverter and Cloud.
+- Hex dump of incoming traffic to identify protocol issues.
+- Added `iptables -F` to ensure a clean redirection state on startup.
+
 ## [1.6.0] - 2026-03-05
 ### Added
 - **Transparent Proxy Mode**: Implemented a duplicator that forwards inverter traffic to Siseli Cloud while parsing data for Home Assistant.

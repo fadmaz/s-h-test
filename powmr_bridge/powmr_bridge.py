@@ -113,40 +113,43 @@ class SolarParser:
                         state["bat_temp"] = r[41]
             if state:
                 ha_client.publish(STATE_TOPIC, json.dumps(state))
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data duplicated to HA: {len(state)} params.")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data duplicated to HA.")
         except: pass
 
-# --- TRANSPARENT PROXY (DUPLICATOR) ---
-async def forward_stream(reader, writer, is_inverter=False):
-    """Пересилає байти з одного кінця в інший. Якщо це інвертор - паралельно парсимо дані."""
+# --- DIAGNOSTIC PROXY ---
+async def forward_stream(reader, writer, label, is_inverter=False):
     try:
         while True:
             data = await reader.read(8192)
             if not data: break
             
+            # DIAGNOSTIC LOG
+            hex_dump = data[:16].hex(' ')
+            print(f"[TRAFFIC] {label}: {len(data)} bytes | Hex: {hex_dump}...")
+            
             if is_inverter:
-                SolarParser.parse_payload(data) # Дублюємо дані для HA
+                SolarParser.parse_payload(data)
                 
-            writer.write(data) # Відправляємо оригінальний пакет далі (в хмару або інвертору)
+            writer.write(data)
             await writer.drain()
-    except Exception: pass
+    except Exception as e: 
+        print(f"[TRAFFIC ERROR] {label}: {e}")
     finally: 
         writer.close()
 
 async def client_connected(inverter_reader, inverter_writer):
-    """Коли інвертор підключається до нашого сервера, ми підключаємось до Китаю і з'єднуємо їх."""
-    print(f"[PROXY] Inverter connected! Establishing link to Siseli Cloud ({TARGET_HOST})...")
+    peer = inverter_writer.get_extra_info('peername')
+    print(f"[PROXY] New connection from {peer}")
     try:
         cloud_reader, cloud_writer = await asyncio.open_connection(TARGET_HOST, 1883)
-        print("[PROXY] Link to Cloud established. Duplicating traffic.")
+        print(f"[PROXY] Link to Cloud ({TARGET_HOST}) established.")
         
-        # Двостороння пересилка
         await asyncio.gather(
-            forward_stream(inverter_reader, cloud_writer, is_inverter=True), # Inverter -> Cloud
-            forward_stream(cloud_reader, inverter_writer, is_inverter=False) # Cloud -> Inverter
+            forward_stream(inverter_reader, cloud_writer, "Inverter -> Cloud", is_inverter=True),
+            forward_stream(cloud_reader, inverter_writer, "Cloud -> Inverter", is_inverter=False)
         )
     except Exception as e: 
-        print(f"[PROXY] Connection error: {e}")
+        print(f"[PROXY ERROR] {e}")
     finally: 
         inverter_writer.close()
 
@@ -175,7 +178,7 @@ async def main():
     connect_ha_mqtt()
     
     proxy_server = await asyncio.start_server(client_connected, '0.0.0.0', LISTEN_PORT)
-    print(f"--- PowMr Duplicator 1.6.0 ACTIVE (Port {LISTEN_PORT}) ---")
+    print(f"--- PowMr Diagnostic Proxy 1.6.1 ACTIVE (Port {LISTEN_PORT}) ---")
     async with proxy_server:
         await proxy_server.serve_forever()
 

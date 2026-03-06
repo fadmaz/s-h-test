@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- PowMr Bridge 1.6.0 (Transparent Proxy Mode) ---"
+echo "--- PowMr Bridge 1.6.1 (Diagnostic Proxy) ---"
 
 # Експорт налаштувань
 export MQTT_HOST=$(bashio::config 'mqtt_host' 'core-mosquitto')
@@ -11,8 +11,9 @@ export TARGET_HOST=$(bashio::config 'TARGET_HOST' '8.212.18.157')
 export INVERTER_IP=$(bashio::config 'INVERTER_IP' '')
 export ROUTER_IP=$(bashio::config 'ROUTER_IP' '')
 
-# Перенаправляємо транзитний трафік у наш скрипт-дублікатор
-iptables -t nat -A PREROUTING -p tcp --dport 1883 -j REDIRECT --to-port 18899 || echo "WARNING: iptables failed"
+# Повне очищення і встановлення правила ПЕРШИМ
+iptables -t nat -F PREROUTING 2>/dev/null
+iptables -t nat -I PREROUTING 1 -p tcp --dport 1883 -j REDIRECT --to-port 18899 || echo "WARNING: iptables failed"
 
-echo "Launching Universal Python Bridge..."
+echo "Launching Diagnostic Proxy..."
 python3 -u /app/powmr_bridge.py
