@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.2] - 2026-03-05
+### Fixed
+- Re-implemented strict source IP filtering (`-s $INVERTER_IP`) in `iptables` to prevent intercepting internal HA traffic.
+- Added background heartbeat (ping) to keep the inverter connection alive and ARP table warm.
+- Enhanced proxy logging to show the actual IP of the connected device.
+
 ## [1.6.1] - 2026-03-05
 ### Added
 - **Diagnostic Proxy Logging**: Added real-time tracking of data packets between Inverter and Cloud.

@@ -28,6 +28,15 @@ LISTEN_PORT = 18899
 DEVICE_ID = "powmr_rwb1"
 STATE_TOPIC = f"powmr/{DEVICE_ID}/state"
 
+# --- HEARTBEAT (Ping) ---
+def heartbeat():
+    while True:
+        try:
+            import subprocess
+            subprocess.call(["ping", "-c", "1", "-W", "1", INVERTER_IP], stdout=subprocess.DEVNULL)
+        except: pass
+        time.sleep(30)
+
 # --- MQTT ---
 ha_client = mqtt.Client()
 if HA_USER and HA_PASS: ha_client.username_pw_set(HA_USER, HA_PASS)
@@ -113,45 +122,33 @@ class SolarParser:
                         state["bat_temp"] = r[41]
             if state:
                 ha_client.publish(STATE_TOPIC, json.dumps(state))
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data duplicated to HA.")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data captured and sent to HA.")
         except: pass
 
-# --- DIAGNOSTIC PROXY ---
+# --- PROXY ---
 async def forward_stream(reader, writer, label, is_inverter=False):
     try:
         while True:
             data = await reader.read(8192)
             if not data: break
-            
-            # DIAGNOSTIC LOG
-            hex_dump = data[:16].hex(' ')
-            print(f"[TRAFFIC] {label}: {len(data)} bytes | Hex: {hex_dump}...")
-            
-            if is_inverter:
-                SolarParser.parse_payload(data)
-                
+            if is_inverter: SolarParser.parse_payload(data)
             writer.write(data)
             await writer.drain()
-    except Exception as e: 
-        print(f"[TRAFFIC ERROR] {label}: {e}")
-    finally: 
-        writer.close()
+    except Exception: pass
+    finally: writer.close()
 
-async def client_connected(inverter_reader, inverter_writer):
-    peer = inverter_writer.get_extra_info('peername')
-    print(f"[PROXY] New connection from {peer}")
+async def client_connected(ir, iw):
+    peer = iw.get_extra_info('peername')
+    print(f"[PROXY] Connection from {peer} (Expected Inverter: {INVERTER_IP})")
     try:
-        cloud_reader, cloud_writer = await asyncio.open_connection(TARGET_HOST, 1883)
-        print(f"[PROXY] Link to Cloud ({TARGET_HOST}) established.")
-        
+        cr, cw = await asyncio.open_connection(TARGET_HOST, 1883)
+        print(f"[PROXY] Successfully connected to Cloud {TARGET_HOST}")
         await asyncio.gather(
-            forward_stream(inverter_reader, cloud_writer, "Inverter -> Cloud", is_inverter=True),
-            forward_stream(cloud_reader, inverter_writer, "Cloud -> Inverter", is_inverter=False)
+            forward_stream(ir, cw, "Inv->Cloud", is_inverter=True),
+            forward_stream(cr, iw, "Cloud->Inv", is_inverter=False)
         )
-    except Exception as e: 
-        print(f"[PROXY ERROR] {e}")
-    finally: 
-        inverter_writer.close()
+    except Exception as e: print(f"[PROXY ERROR] {e}")
+    finally: iw.close()
 
 # --- ARP SPOOFER ---
 class ArpSpoofer:
@@ -174,13 +171,12 @@ class ArpSpoofer:
 async def main():
     if INVERTER_IP and ROUTER_IP:
         threading.Thread(target=ArpSpoofer(INVERTER_IP, ROUTER_IP).run, daemon=True).start()
+        threading.Thread(target=heartbeat, daemon=True).start()
     
     connect_ha_mqtt()
     
     proxy_server = await asyncio.start_server(client_connected, '0.0.0.0', LISTEN_PORT)
-    print(f"--- PowMr Diagnostic Proxy 1.6.1 ACTIVE (Port {LISTEN_PORT}) ---")
-    async with proxy_server:
-        await proxy_server.serve_forever()
+    print(f"--- PowMr Bridge 1.6.2 ACTIVE (Port {LISTEN_PORT}) ---")
+    async with proxy_server: await proxy_server.serve_forever()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == "__main__": asyncio.run(main())
