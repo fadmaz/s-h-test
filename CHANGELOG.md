@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2026-03-05
+### Added
+- **Universal Mode**: Combined ARP Spoofing with Passive Packet Sniffing.
+- No longer depends on `iptables` or router reconfiguration.
+- Automatic discovery watchdog to keep Home Assistant sensors updated.
+- Detailed capture logging for real-time status.
+
 ## [1.4.1] - 2026-03-05
 ### Added
 - **Router-Assisted Mode**: Optimized the bridge to work with external port redirection (e.g., from OpenWrt).
