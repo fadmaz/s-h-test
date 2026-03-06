@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2026-03-05
+### Added
+- **Autonomous Proxy Mode (MITM)**: Switched to a full Man-in-the-Middle proxy.
+- HA now actively manages the connection between the Inverter and Siseli Cloud.
+- Fixed data loss issue caused by HA kernel dropping transit packets.
+- Implemented surgical `iptables` redirection restricted to the Inverter's source IP.
+
 ## [1.6.2] - 2026-03-05
 ### Fixed
 - Re-implemented strict source IP filtering (`-s $INVERTER_IP`) in `iptables` to prevent intercepting internal HA traffic.
