@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-03-05
+### Changed
+- Switched to **Direct Packet Capture Mode** using Scapy Sniffing.
+- Removed all `iptables` and NAT redirection logic for maximum compatibility with HAOS/Docker.
+- Implemented real-time packet parsing directly from the network interface.
+
 ## [1.3.0] - 2026-03-05
 ### Added
 - Implemented Inverter Heartbeat (ICMP ping) to monitor connectivity.

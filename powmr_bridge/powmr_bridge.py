@@ -8,7 +8,7 @@ import logging
 import os
 import paho.mqtt.client as mqtt
 from datetime import datetime
-from scapy.all import ARP, Ether, sendp, getmacbyip, conf, sniff, IP, TCP, ICMP
+from scapy.all import ARP, Ether, sendp, getmacbyip, conf, sniff, IP, TCP, Raw
 
 # Silence warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -17,7 +17,6 @@ logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 # --- CONFIG ---
 TARGET_HOST = os.getenv('TARGET_HOST', '8.212.18.157')
 TARGET_PORT = int(os.getenv('TARGET_PORT', 1883))
-LISTEN_PORT = int(os.getenv('LISTEN_PORT', 18899))
 
 HA_BROKER = os.getenv('MQTT_HOST', 'core-mosquitto') 
 HA_PORT = int(os.getenv('MQTT_PORT', 1883))
@@ -32,7 +31,6 @@ ROUTER_MAC_MANUAL = os.getenv('ROUTER_MAC', '').strip()
 DEVICE_ID = "powmr_rwb1"
 STATE_TOPIC = f"powmr/{DEVICE_ID}/state"
 
-# Interface detection
 def get_best_iface():
     try:
         import subprocess
@@ -41,81 +39,6 @@ def get_best_iface():
     except: return "enp0s3"
 
 conf.iface = get_best_iface()
-
-# --- WATCHDOG ---
-def watchdog_callback(packet):
-    if packet.haslayer(IP):
-        src = packet[IP].src
-        dst = packet[IP].dst
-        if src == INVERTER_IP:
-            proto = "TCP" if packet.haslayer(TCP) else "UDP" if packet.haslayer(UDP) else "ICMP" if packet.haslayer(ICMP) else "OTHER"
-            port = packet[TCP].dport if packet.haslayer(TCP) else ""
-            print(f"[WATCHDOG] Traffic from Inverter: {proto} to {dst} {port}")
-
-def start_watchdog():
-    print("[WATCHDOG] Monitoring ALL traffic from Inverter...")
-    sniff(iface=conf.iface, prn=watchdog_callback, filter=f"ip src {INVERTER_IP}", store=0)
-
-# --- HEARTBEAT ---
-def heartbeat():
-    while True:
-        try:
-            import subprocess
-            res = subprocess.call(["ping", "-c", "1", "-W", "1", INVERTER_IP], stdout=subprocess.DEVNULL)
-            if res == 0:
-                print(f"[HEARTBEAT] Inverter {INVERTER_IP} is ONLINE")
-            else:
-                print(f"[HEARTBEAT] Inverter {INVERTER_IP} is OFFLINE!")
-        except: pass
-        time.sleep(30)
-
-SENSORS = {
-    "grid_v": ["Grid Voltage", "V", "voltage", "mdi:transmission-tower"],
-    "grid_hz": ["Grid Frequency", "Hz", "frequency", "mdi:current-ac"],
-    "out_v": ["Output Voltage", "V", "voltage", "mdi:power-plug"],
-    "out_hz": ["Output Frequency", "Hz", "frequency", "mdi:current-ac"],
-    "load_w": ["Active Load", "W", "power", "mdi:home-lightning-bolt"],
-    "apparent_va": ["Apparent Load", "VA", "apparent_power", "mdi:flash"],
-    "load_pct": ["Load Percentage", "%", "power_factor", "mdi:gauge"],
-    "bat_v": ["Battery Voltage", "V", "voltage", "mdi:battery"],
-    "bat_cap": ["Battery Capacity", "%", "battery", "mdi:battery-high"],
-    "dischg_current": ["Battery Discharge Current", "A", "current", "mdi:battery-minus"],
-    "bat_temp": ["Inverter Temperature", "°C", "temperature", "mdi:thermometer"],
-    "pv_w": ["PV Power", "W", "power", "mdi:solar-power"],
-    "pv_v": ["PV Voltage", "V", "voltage", "mdi:solar-panel"],
-    "max_chg": ["Max Charge Current", "A", "current", "mdi:current-dc"],
-    "util_chg": ["Utility Charge Current", "A", "current", "mdi:current-dc"],
-    "bulk_v": ["Bulk Charging Voltage", "V", "voltage", "mdi:battery-charging-high"],
-    "float_v": ["Float Charging Voltage", "V", "voltage", "mdi:battery-charging-medium"],
-    "cut_v": ["Low Battery Cut-off", "V", "voltage", "mdi:battery-off-outline"],
-    "sbu_return_grid": ["SBU Return to Grid Volts", "V", "voltage", "mdi:transmission-tower-export"],
-    "sbu_return_bat": ["SBU Return to Battery Volts", "V", "voltage", "mdi:battery-arrow-up"]
-}
-
-class ArpSpoofer:
-    def __init__(self, target_ip, gateway_ip, target_mac=None, gateway_mac=None):
-        self.target_ip, self.gateway_ip = target_ip, gateway_ip
-        self.target_mac, self.gateway_mac = target_mac, gateway_mac
-        self.running = False
-
-    def get_mac(self, ip):
-        mac = getmacbyip(ip)
-        if mac: print(f"[ARP] Found MAC for {ip}: {mac}")
-        else: print(f"[ARP] WARNING: Failed to find MAC for {ip}")
-        return mac
-
-    def run(self):
-        t_mac = self.target_mac if self.target_mac else self.get_mac(self.target_ip)
-        g_mac = self.gateway_mac if self.gateway_mac else self.get_mac(self.gateway_ip)
-        if not t_mac or not g_mac: return
-        self.running = True
-        print(f"[ARP] Spoofing ACTIVE: {self.target_ip} <-> {self.gateway_ip}")
-        try:
-            while self.running:
-                sendp(Ether(dst=t_mac)/ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst=t_mac), verbose=False)
-                sendp(Ether(dst=g_mac)/ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst=g_mac), verbose=False)
-                time.sleep(2)
-        except Exception: pass
 
 # --- MQTT ---
 ha_client = mqtt.Client()
@@ -130,8 +53,27 @@ def connect_ha_mqtt():
     except Exception as e: print(f"[HA MQTT ERROR] {e}")
 
 def publish_discovery():
-    print(f"[HA MQTT] Publishing {len(SENSORS)} discovery topics...")
-    for key, data in SENSORS.items():
+    sensors = {
+        "grid_v": ["Grid Voltage", "V", "voltage", "mdi:transmission-tower"],
+        "grid_hz": ["Grid Frequency", "Hz", "frequency", "mdi:current-ac"],
+        "out_v": ["Output Voltage", "V", "voltage", "mdi:power-plug"],
+        "out_hz": ["Output Frequency", "Hz", "frequency", "mdi:current-ac"],
+        "load_w": ["Active Load", "W", "power", "mdi:home-lightning-bolt"],
+        "apparent_va": ["Apparent Load", "VA", "apparent_power", "mdi:flash"],
+        "load_pct": ["Load Percentage", "%", "power_factor", "mdi:gauge"],
+        "bat_v": ["Battery Voltage", "V", "voltage", "mdi:battery"],
+        "bat_cap": ["Battery Capacity", "%", "battery", "mdi:battery-high"],
+        "dischg_current": ["Battery Discharge Current", "A", "current", "mdi:battery-minus"],
+        "bat_temp": ["Inverter Temperature", "°C", "temperature", "mdi:thermometer"],
+        "pv_w": ["PV Power", "W", "power", "mdi:solar-power"],
+        "pv_v": ["PV Voltage", "V", "voltage", "mdi:solar-panel"],
+        "max_chg": ["Max Charge Current", "A", "current", "mdi:current-dc"],
+        "util_chg": ["Utility Charge Current", "A", "current", "mdi:current-dc"],
+        "bulk_v": ["Bulk Charging Voltage", "V", "voltage", "mdi:battery-charging-high"],
+        "float_v": ["Float Charging Voltage", "V", "voltage", "mdi:battery-charging-medium"],
+        "cut_v": ["Low Battery Cut-off", "V", "voltage", "mdi:battery-off-outline"]
+    }
+    for key, data in sensors.items():
         topic = f"homeassistant/sensor/{DEVICE_ID}/{key}/config"
         payload = {
             "name": f"PowMr {data[0]}",
@@ -145,6 +87,7 @@ def publish_discovery():
         }
         ha_client.publish(topic, json.dumps(payload), retain=True)
 
+# --- PARSER ---
 class SolarParser:
     @staticmethod
     def parse_payload(payload_bytes):
@@ -176,50 +119,55 @@ class SolarParser:
                     if len(r) >= 42:
                         state["max_chg"] = int.from_bytes(r[13:15], 'little')
                         state["util_chg"] = int.from_bytes(r[17:19], 'little')
-                        state["sbu_return_grid"] = int.from_bytes(r[19:21], 'little') / 10.0
                         state["float_v"] = int.from_bytes(r[21:23], 'little') / 10.0
                         state["bulk_v"] = int.from_bytes(r[23:25], 'little') / 10.0
                         state["cut_v"] = int.from_bytes(r[27:29], 'little') / 10.0
-                        state["sbu_return_bat"] = int.from_bytes(r[29:31], 'little') / 10.0
                         state["bat_temp"] = r[41]
             if state:
                 ha_client.publish(STATE_TOPIC, json.dumps(state))
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data sent: {len(state)} params.")
-        except Exception as e: print(f"[PARSER ERROR] {e}")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data captured: {len(state)} params.")
+        except: pass
 
-async def handle_stream(reader, writer, label):
-    try:
-        while True:
-            data = await reader.read(8192)
-            if not data: break
-            print(f"[PROXY] {label} sent {len(data)} bytes")
-            if data[0] & 0xF0 == 0x30: SolarParser.parse_payload(data)
-            writer.write(data)
-            await writer.drain()
-    except Exception: pass
-    finally: writer.close()
+# --- SNIFFER ---
+def packet_callback(packet):
+    if packet.haslayer(Raw):
+        payload = packet[Raw].load
+        if b'{"b":' in payload:
+            SolarParser.parse_payload(payload)
 
-async def client_connected(ir, iw):
-    peer = iw.get_extra_info('peername')
-    print(f"[PROXY] New connection from {peer}")
-    try:
-        cr, cw = await asyncio.open_connection(TARGET_HOST, TARGET_PORT)
-        await asyncio.gather(handle_stream(ir, cw, "Inverter"), handle_stream(cr, iw, "Cloud"))
-    except Exception as e: print(f"[PROXY ERROR] Cloud connection failed: {e}")
-    finally: iw.close()
+def start_sniffer():
+    print(f"[SNIFFER] Listening for packets from {INVERTER_IP} to cloud...")
+    sniff(iface=conf.iface, prn=packet_callback, filter=f"ip src {INVERTER_IP} and ip dst {TARGET_HOST}", store=0)
 
-async def main():
+# --- ARP SPOOFER ---
+class ArpSpoofer:
+    def __init__(self, target_ip, gateway_ip, target_mac=None, gateway_mac=None):
+        self.target_ip, self.gateway_ip = target_ip, gateway_ip
+        self.target_mac, self.gateway_mac = target_mac, gateway_mac
+        self.running = False
+
+    def get_mac(self, ip):
+        mac = getmacbyip(ip)
+        if mac: print(f"[ARP] Found MAC for {ip}: {mac}")
+        return mac
+
+    def run(self):
+        t_mac = self.target_mac if self.target_mac else self.get_mac(self.target_ip)
+        g_mac = self.gateway_mac if self.gateway_mac else self.get_mac(self.gateway_ip)
+        if not t_mac or not g_mac: return
+        self.running = True
+        print(f"[ARP] Spoofing ACTIVE: {self.target_ip} <-> {self.gateway_ip}")
+        while self.running:
+            sendp(Ether(dst=t_mac)/ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst=t_mac), verbose=False)
+            sendp(Ether(dst=g_mac)/ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst=g_mac), verbose=False)
+            time.sleep(2)
+
+# --- MAIN ---
+if __name__ == "__main__":
     if INVERTER_IP and ROUTER_IP:
-        # Start Threads
         threading.Thread(target=ArpSpoofer(INVERTER_IP, ROUTER_IP, INVERTER_MAC_MANUAL, ROUTER_MAC_MANUAL).run, daemon=True).start()
-        threading.Thread(target=start_watchdog, daemon=True).start()
-        threading.Thread(target=heartbeat, daemon=True).start()
-
+        threading.Thread(target=start_sniffer, daemon=True).start()
+    
     connect_ha_mqtt()
-    proxy_server = await asyncio.start_server(client_connected, '0.0.0.0', LISTEN_PORT)
-    print(f"--- PowMr Bridge 1.3.0 ACTIVE (Port {LISTEN_PORT}) ---")
-    try:
-        async with proxy_server: await proxy_server.serve_forever()
-    except Exception: pass
-
-if __name__ == "__main__": asyncio.run(main())
+    print("--- PowMr Bridge 1.4.0 ACTIVE ---")
+    while True: time.sleep(1)
