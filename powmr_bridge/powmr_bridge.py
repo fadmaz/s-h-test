@@ -23,13 +23,10 @@ HA_PASS = os.getenv('MQTT_PASSWORD', '')
 
 INVERTER_IP = os.getenv('INVERTER_IP', '')
 ROUTER_IP = os.getenv('ROUTER_IP', '')
-INVERTER_MAC_MANUAL = os.getenv('INVERTER_MAC', '').strip()
-ROUTER_MAC_MANUAL = os.getenv('ROUTER_MAC', '').strip()
 
 DEVICE_ID = "powmr_rwb1"
 STATE_TOPIC = f"powmr/{DEVICE_ID}/state"
 
-# Auto-detect interface
 def get_best_iface():
     try:
         import subprocess
@@ -91,9 +88,11 @@ class SolarParser:
     @staticmethod
     def parse_payload(payload_bytes):
         try:
-            start = payload_bytes.find(b'{"b":')
-            if start == -1: return
-            raw_json = json.loads(payload_bytes[start:].decode('utf-8', errors='ignore'))
+            # More robust search for JSON
+            idx = payload_bytes.find(b'{"b":')
+            if idx == -1: return
+            
+            raw_json = json.loads(payload_bytes[idx:].decode('utf-8', errors='ignore'))
             state = {}
             if "b" in raw_json and "ct" in raw_json["b"]:
                 blocks = {item["cn"]: base64.b64decode(item["co"]) for item in raw_json["b"]["ct"]}
@@ -124,38 +123,31 @@ class SolarParser:
                         state["bat_temp"] = r[41]
             if state:
                 ha_client.publish(STATE_TOPIC, json.dumps(state))
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data captured via Sniffer: {len(state)} params.")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ➡️ Data captured: {len(state)} params.")
         except: pass
 
 # --- SNIFFER ---
 def packet_callback(packet):
     if packet.haslayer(Raw):
-        payload = packet[Raw].load
-        if b'{"b":' in payload:
-            SolarParser.parse_payload(payload)
+        SolarParser.parse_payload(packet[Raw].load)
 
 def start_sniffer():
-    print(f"[SNIFFER] Monitoring interface {conf.iface} for Inverter traffic...")
+    print(f"[SNIFFER] Monitoring {conf.iface} for traffic from {INVERTER_IP}...")
+    # More relaxed filter to catch redirected traffic too
     sniff(iface=conf.iface, prn=packet_callback, filter=f"ip src {INVERTER_IP}", store=0)
 
 # --- ARP SPOOFER ---
 class ArpSpoofer:
-    def __init__(self, target_ip, gateway_ip, target_mac=None, gateway_mac=None):
+    def __init__(self, target_ip, gateway_ip):
         self.target_ip, self.gateway_ip = target_ip, gateway_ip
-        self.target_mac, self.gateway_mac = target_mac, gateway_mac
         self.running = False
 
-    def get_mac(self, ip):
-        mac = getmacbyip(ip)
-        if mac: print(f"[ARP] Found MAC for {ip}: {mac}")
-        return mac
-
     def run(self):
-        t_mac = self.target_mac if self.target_mac else self.get_mac(self.target_ip)
-        g_mac = self.gateway_mac if self.gateway_mac else self.get_mac(self.gateway_ip)
+        t_mac = getmacbyip(self.target_ip)
+        g_mac = getmacbyip(self.gateway_ip)
         if not t_mac or not g_mac: return
         self.running = True
-        print(f"[ARP] Universal Spoofing ACTIVE: {self.target_ip} <-> {self.gateway_ip}")
+        print(f"[ARP] Spoofing ACTIVE: {self.target_ip} <-> {self.gateway_ip}")
         while self.running:
             sendp(Ether(dst=t_mac)/ARP(op=2, pdst=self.target_ip, psrc=self.gateway_ip, hwdst=t_mac), verbose=False)
             sendp(Ether(dst=g_mac)/ARP(op=2, pdst=self.gateway_ip, psrc=self.target_ip, hwdst=g_mac), verbose=False)
@@ -164,13 +156,11 @@ class ArpSpoofer:
 # --- MAIN ---
 if __name__ == "__main__":
     if INVERTER_IP and ROUTER_IP:
-        threading.Thread(target=ArpSpoofer(INVERTER_IP, ROUTER_IP, INVERTER_MAC_MANUAL, ROUTER_MAC_MANUAL).run, daemon=True).start()
+        threading.Thread(target=ArpSpoofer(INVERTER_IP, ROUTER_IP).run, daemon=True).start()
         threading.Thread(target=start_sniffer, daemon=True).start()
     
     connect_ha_mqtt()
-    print("--- PowMr Bridge 1.5.0 ACTIVE (Universal Mode) ---")
-    
-    # Discovery watchdog (keep sensors alive)
+    print("--- PowMr Bridge 1.5.1 ACTIVE ---")
     while True:
         publish_discovery()
         time.sleep(300)

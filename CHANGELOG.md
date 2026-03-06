@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2026-03-05
+### Fixed
+- Improved JSON payload detection in TCP packets (robust against MQTT headers).
+- Broadened sniffer filters to capture traffic even if destination IP is modified by the router.
+- Cleaned up legacy router firewall rules recommendation.
+
 ## [1.5.0] - 2026-03-05
 ### Added
 - **Universal Mode**: Combined ARP Spoofing with Passive Packet Sniffing.
