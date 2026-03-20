@@ -1,6 +1,6 @@
 name: "PowMr Inverter Bridge"
-description: "Local bridge for PowMr inverters with ARP Spoofing Auto-Discovery."
-version: "1.9.0"
+description: "Local bridge for PowMr/Siseli inverters with MQTT discovery for Home Assistant."
+version: "2.0.0"
 slug: "powmr_bridge"
 init: false
 arch:
@@ -11,26 +11,55 @@ arch:
   - i386
 startup: "application"
 host_network: true
-full_access: true
 privileged:
   - NET_ADMIN
   - NET_RAW
 apparmor: false
+
 options:
+  MQTT_HOST: "core-mosquitto"
+  MQTT_PORT: 1883
+  MQTT_USER: ""
+  MQTT_PASSWORD: ""
+
   TARGET_HOST: "8.212.18.157"
   TARGET_PORT: 1883
   LISTEN_PORT: 18899
+
   INVERTER_IP: "192.168.1.139"
   ROUTER_IP: "192.168.1.1"
   INVERTER_MAC: ""
   ROUTER_MAC: ""
   AUTO_INTERCEPT: true
+
+  MQTT_DISCOVERY_PREFIX: "homeassistant"
+  DEVICE_ID: "powmr_rwb1"
+  DEVICE_NAME: "PowMr 6.2kW Inverter"
+  STATE_TOPIC: "powmr/powmr_rwb1/state"
+  AVAILABILITY_TOPIC: "powmr/powmr_rwb1/availability"
+  SNIFF_IFACE: ""
+  LOG_VERBOSE: true
+
 schema:
+  MQTT_HOST: str
+  MQTT_PORT: int
+  MQTT_USER: str?
+  MQTT_PASSWORD: password?
+
   TARGET_HOST: str
   TARGET_PORT: int
   LISTEN_PORT: int
+
   INVERTER_IP: str
   ROUTER_IP: str
   INVERTER_MAC: str?
   ROUTER_MAC: str?
   AUTO_INTERCEPT: bool
+
+  MQTT_DISCOVERY_PREFIX: str
+  DEVICE_ID: str
+  DEVICE_NAME: str
+  STATE_TOPIC: str
+  AVAILABILITY_TOPIC: str
+  SNIFF_IFACE: str?
+  LOG_VERBOSE: bool
