@@ -40,6 +40,9 @@ AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"powmr/{DEVICE_ID}/availab
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 LOG_VERBOSE = os.getenv("LOG_VERBOSE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
+# PowMr 6.2kW model default, used only for estimated load %
+INVERTER_RATED_W = float(os.getenv("INVERTER_RATED_W", "6200"))
+
 INV_MAC: Optional[str] = None
 RTR_MAC: Optional[str] = None
 RUNNING = True
@@ -62,7 +65,7 @@ SENSORS = {
     "out_hz": {"name": "Output Frequency", "unit": "Hz", "device_class": "frequency", "state_class": "measurement", "icon": "mdi:current-ac"},
     "load_w": {"name": "Active Load", "unit": "W", "device_class": "power", "state_class": "measurement", "icon": "mdi:home-lightning-bolt"},
     "apparent_va": {"name": "Apparent Load", "unit": "VA", "device_class": "apparent_power", "state_class": "measurement", "icon": "mdi:flash"},
-    "load_pct": {"name": "Load Percentage", "unit": "%", "state_class": "measurement", "icon": "mdi:gauge"},
+    "load_pct": {"name": "Estimated Load Percentage", "unit": "%", "state_class": "measurement", "icon": "mdi:gauge"},
     "bat_v": {"name": "Battery Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery"},
     "bat_cap": {"name": "Battery Capacity", "unit": "%", "device_class": "battery", "state_class": "measurement", "icon": "mdi:battery-high"},
     "dischg_current": {"name": "Battery Discharge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:battery-minus"},
@@ -74,6 +77,23 @@ SENSORS = {
     "bulk_v": {"name": "Bulk Charging Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-charging-high"},
     "float_v": {"name": "Float Charging Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-charging-medium"},
     "cut_v": {"name": "Low Battery Cut-off", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-off-outline"},
+
+    # Extra decoded / diagnostic sensors
+    "inverter_model": {"name": "Inverter Model", "icon": "mdi:identifier"},
+    "firmware_info": {"name": "Firmware Info", "icon": "mdi:chip"},
+    "cell_count": {"name": "Battery Cell Count", "state_class": "measurement", "icon": "mdi:battery-outline"},
+    "cell_min_mv": {"name": "Battery Cell Min", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-low"},
+    "cell_max_mv": {"name": "Battery Cell Max", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-high"},
+    "cell_avg_mv": {"name": "Battery Cell Average", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-medium"},
+    "cell_delta_mv": {"name": "Battery Cell Delta", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-sync"},
+
+    "diag_93vq": {"name": "Diag 93VQ", "icon": "mdi:text-box-outline"},
+    "diag_cost": {"name": "Diag COST", "icon": "mdi:text-box-outline"},
+    "diag_v4w3": {"name": "Diag V4W3", "icon": "mdi:text-box-outline"},
+    "diag_yavb": {"name": "Diag Yavb", "icon": "mdi:text-box-outline"},
+    "diag_eo8w": {"name": "Diag eo8w", "icon": "mdi:text-box-outline"},
+    "diag_noep": {"name": "Diag noeP", "icon": "mdi:text-box-outline"},
+    "diag_uxjp": {"name": "Diag uxJp", "icon": "mdi:text-box-outline"},
 }
 
 MQTT_PACKET_TYPES = {
@@ -313,8 +333,6 @@ def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[byte
 
 
 class SolarParser:
-    DEBUG_DUMPS_LEFT = 3
-
     @staticmethod
     def _safe_b64decode(value: str) -> Optional[bytes]:
         try:
@@ -374,30 +392,27 @@ class SolarParser:
         return "".join(out)
 
     @staticmethod
-    def _u16_words(data: bytes, count: int = 12):
-        words = []
-        max_len = min(len(data) // 2, count)
-        for i in range(max_len):
-            start = i * 2
-            words.append(int.from_bytes(data[start:start + 2], "little"))
-        return words
+    def _clip(text: str, max_len: int = 240) -> str:
+        text = text.strip()
+        return text if len(text) <= max_len else text[:max_len]
 
     @staticmethod
-    def _parse_ascii_tokens(data: bytes) -> list[str]:
+    def _parse_ascii_text(data: bytes) -> Tuple[str, List[str]]:
         text = data.decode("utf-8", errors="ignore")
-        text = text.replace("\r", " ").replace("\n", " ").strip()
+        text = text.replace("\r", " ").replace("\n", " ").replace("\x00", " ").strip()
         if text.startswith("("):
             text = text[1:]
-        text = text.replace("\x00", " ").strip()
+        text = text.strip()
+
         parts = [p.strip() for p in text.split(" ") if p.strip()]
         cleaned = []
         for p in parts:
-            p = p.strip()
-            while p and p[-1] in "),;:\x00\r\n\t":
+            while p and p[-1] in "),;:\t":
                 p = p[:-1]
             if p:
                 cleaned.append(p)
-        return cleaned
+
+        return text, cleaned
 
     @staticmethod
     def _to_float(token: str) -> Optional[float]:
@@ -436,7 +451,7 @@ class SolarParser:
             state["out_hz"] = round(int.from_bytes(ps4z[23:25], "little") / 10.0, 1)
             state["apparent_va"] = int.from_bytes(ps4z[25:27], "little")
             state["load_w"] = int.from_bytes(ps4z[27:29], "little")
-            state["load_pct"] = int.from_bytes(ps4z[29:31], "little")
+            state["load_pct"] = round((float(state["load_w"]) / INVERTER_RATED_W) * 100.0, 1)
             state["pv_v"] = round(int.from_bytes(ps4z[39:41], "little") / 10.0, 1)
 
             pv_w = int.from_bytes(ps4z[41:43], "little")
@@ -464,10 +479,10 @@ class SolarParser:
     @staticmethod
     def _try_ascii_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
         state: Dict[str, object] = {}
-        parsed = {name: SolarParser._parse_ascii_tokens(data) for name, data in blocks.items()}
+        parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
 
-        # 2l0E: e.g. ["229.6", "50.0", "00321", "00209"]
-        vals = parsed.get("2l0E", [])
+        # Main live values
+        vals = parsed.get("2l0E", ("", []))[1]
         if len(vals) >= 2:
             v = SolarParser._to_float(vals[0])
             hz = SolarParser._to_float(vals[1])
@@ -476,14 +491,12 @@ class SolarParser:
             if hz is not None:
                 state["grid_hz"] = round(hz, 1)
 
-        # WdRR: e.g. ["234.9", "49.9", "280", "170", "65", "4"]
-        vals = parsed.get("WdRR", [])
-        if len(vals) >= 5:
+        vals = parsed.get("WdRR", ("", []))[1]
+        if len(vals) >= 4:
             out_v = SolarParser._to_float(vals[0])
             out_hz = SolarParser._to_float(vals[1])
             apparent = SolarParser._to_int(vals[2])
             load_w = SolarParser._to_int(vals[3])
-            load_pct = SolarParser._to_int(vals[4])
 
             if out_v is not None:
                 state["out_v"] = round(out_v, 1)
@@ -493,11 +506,9 @@ class SolarParser:
                 state["apparent_va"] = apparent
             if load_w is not None:
                 state["load_w"] = load_w
-            if load_pct is not None:
-                state["load_pct"] = load_pct
+                state["load_pct"] = round((float(load_w) / INVERTER_RATED_W) * 100.0, 1)
 
-        # 2ONL: e.g. ["04", "052.9", "056", "000", "00006"]
-        vals = parsed.get("2ONL", [])
+        vals = parsed.get("2ONL", ("", []))[1]
         if len(vals) >= 3:
             bat_v = SolarParser._to_float(vals[1])
             bat_cap = SolarParser._to_int(vals[2])
@@ -506,8 +517,7 @@ class SolarParser:
             if bat_cap is not None:
                 state["bat_cap"] = bat_cap
 
-        # Mpod: e.g. ["000.0", "00.0", "00000", "00000"]
-        vals = parsed.get("Mpod", [])
+        vals = parsed.get("Mpod", ("", []))[1]
         if len(vals) >= 3:
             pv_v = SolarParser._to_float(vals[0])
             pv_w = SolarParser._to_int(vals[2])
@@ -516,8 +526,7 @@ class SolarParser:
             if pv_w is not None:
                 state["pv_w"] = pv_w
 
-        # dHrK: e.g. ["1", "044.0", "020", "044.0", "046.0"]
-        vals = parsed.get("dHrK", [])
+        vals = parsed.get("dHrK", ("", []))[1]
         if len(vals) >= 5:
             cut_v = SolarParser._to_float(vals[1])
             max_chg = SolarParser._to_int(vals[2])
@@ -533,6 +542,7 @@ class SolarParser:
             if bulk_v is not None:
                 state["bulk_v"] = round(bulk_v, 1)
 
+        # Derived discharge current
         bat_v = float(state.get("bat_v") or 0)
         load_w = float(state.get("load_w") or 0)
         grid_v = float(state.get("grid_v") or 0)
@@ -540,6 +550,41 @@ class SolarParser:
             state["dischg_current"] = round(load_w / bat_v, 1)
         elif "bat_v" in state:
             state["dischg_current"] = 0
+
+        # Extra text / diag fields
+        if "SUCV" in parsed:
+            state["inverter_model"] = SolarParser._clip(parsed["SUCV"][0])
+        if "hR6Y" in parsed:
+            state["firmware_info"] = SolarParser._clip(parsed["hR6Y"][0])
+
+        raw_map = {
+            "93VQ": "diag_93vq",
+            "COST": "diag_cost",
+            "V4W3": "diag_v4w3",
+            "Yavb": "diag_yavb",
+            "eo8w": "diag_eo8w",
+            "noeP": "diag_noep",
+            "uxJp": "diag_uxjp",
+        }
+        for block_name, state_key in raw_map.items():
+            if block_name in parsed:
+                state[state_key] = SolarParser._clip(parsed[block_name][0])
+
+        # BMS-like cell voltages from v09K
+        if "v09K" in parsed:
+            tokens = parsed["v09K"][1]
+            cell_values = []
+            for tok in tokens:
+                val = SolarParser._to_int(tok)
+                if val is not None and 2000 <= val <= 5000:
+                    cell_values.append(val)
+
+            if len(cell_values) >= 4:
+                state["cell_count"] = len(cell_values)
+                state["cell_min_mv"] = min(cell_values)
+                state["cell_max_mv"] = max(cell_values)
+                state["cell_avg_mv"] = round(sum(cell_values) / len(cell_values), 1)
+                state["cell_delta_mv"] = max(cell_values) - min(cell_values)
 
         return state
 
@@ -599,19 +644,6 @@ class SolarParser:
                     log(f"[PARSER DEBUG] b_keys={list(raw_json['b'].keys())}")
 
                 SCHEMA_DEBUG_DONE = True
-
-            if SolarParser.DEBUG_DUMPS_LEFT > 0:
-                log(f"[BLOCKS] found={sorted(blocks.keys())}")
-                for name in sorted(blocks.keys()):
-                    data = blocks[name]
-                    hex_preview = data[:24].hex()
-                    ascii_preview = SolarParser._ascii_preview(data, 24)
-                    words = SolarParser._u16_words(data, 10)
-                    log(
-                        f"[BLOCK] name={name} len={len(data)} "
-                        f"hex={hex_preview} ascii={ascii_preview} words={words}"
-                    )
-                SolarParser.DEBUG_DUMPS_LEFT -= 1
 
             state = SolarParser._try_old_schema(blocks)
             if not state:
@@ -796,7 +828,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- PowMr Bridge 2.0.8 ---")
+    log("--- PowMr Bridge 2.1.0 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
