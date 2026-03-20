@@ -53,6 +53,7 @@ SEGMENT_CACHE: Dict[Tuple[str, int, str, int], Dict[Tuple[int, int, bytes], floa
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
 LAST_PACKET_TS = 0.0
+SCHEMA_DEBUG_DONE = False
 
 SENSORS = {
     "grid_v": {"name": "Grid Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:transmission-tower"},
@@ -313,7 +314,57 @@ def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[byte
 
 class SolarParser:
     @staticmethod
+    def _safe_b64decode(value: str) -> Optional[bytes]:
+        try:
+            s = value.strip()
+            if not s:
+                return None
+            pad = len(s) % 4
+            if pad:
+                s += "=" * (4 - pad)
+            data = base64.b64decode(s, validate=False)
+            if not data:
+                return None
+            return data
+        except Exception:
+            return None
+
+    @staticmethod
+    def _walk_for_blocks(obj):
+        found = []
+
+        if isinstance(obj, dict):
+            possible_name = None
+            possible_value = None
+
+            for key in ("cn", "code", "name", "n", "c", "id"):
+                val = obj.get(key)
+                if isinstance(val, str) and val.strip():
+                    possible_name = val.strip()
+                    break
+
+            for key in ("co", "cv", "data", "d", "value", "v"):
+                val = obj.get(key)
+                if isinstance(val, str) and val.strip():
+                    possible_value = val.strip()
+                    break
+
+            if possible_name and possible_value:
+                found.append((possible_name, possible_value))
+
+            for v in obj.values():
+                found.extend(SolarParser._walk_for_blocks(v))
+
+        elif isinstance(obj, list):
+            for item in obj:
+                found.extend(SolarParser._walk_for_blocks(item))
+
+        return found
+
+    @staticmethod
     def parse_payload(payload_bytes: bytes) -> None:
+        global SCHEMA_DEBUG_DONE
+
         try:
             log(f"[PARSER] candidate len={len(payload_bytes)}")
 
@@ -325,6 +376,9 @@ class SolarParser:
                     idx = 0
 
             if idx == -1:
+                idx = payload_bytes.find(b"{")
+
+            if idx == -1:
                 log("[PARSER] JSON marker not found")
                 return
 
@@ -334,21 +388,54 @@ class SolarParser:
                 raw = raw[:end + 1]
 
             raw_json = json.loads(raw)
-            blocks = {}
 
-            for item in raw_json.get("b", {}).get("ct", []):
-                name = item.get("cn")
-                content = item.get("co")
-                if not name or not content:
+            candidate_pairs = SolarParser._walk_for_blocks(raw_json)
+            blocks = {}
+            block_summaries = []
+            seen = set()
+
+            for name, encoded in candidate_pairs:
+                key = name.strip()
+                if not key:
                     continue
-                try:
-                    blocks[name] = base64.b64decode(content)
-                except Exception:
+
+                dedupe_key = (key, encoded[:32])
+                if dedupe_key in seen:
                     continue
+                seen.add(dedupe_key)
+
+                decoded = SolarParser._safe_b64decode(encoded)
+                if decoded is None:
+                    continue
+
+                blocks[key] = decoded
+                block_summaries.append(f"{key}:{len(decoded)}")
+
+            if not SCHEMA_DEBUG_DONE:
+                top_keys = list(raw_json.keys()) if isinstance(raw_json, dict) else []
+                log(f"[PARSER DEBUG] top_keys={top_keys}")
+
+                if isinstance(raw_json, dict) and isinstance(raw_json.get("b"), dict):
+                    log(f"[PARSER DEBUG] b_keys={list(raw_json['b'].keys())}")
+
+                if block_summaries:
+                    log(f"[PARSER DEBUG] discovered_blocks={block_summaries[:20]}")
+                else:
+                    preview = raw[:500].replace("\n", " ")
+                    log(f"[PARSER DEBUG] raw_preview={preview}")
+
+                SCHEMA_DEBUG_DONE = True
+
+            lower_blocks = {k.lower(): v for k, v in blocks.items()}
+
+            ps4z = lower_blocks.get("ps4z")
+            sgx0 = (
+                lower_blocks.get("sgx0")
+                or lower_blocks.get("sgxo")
+            )
 
             state: Dict[str, object] = {}
 
-            ps4z = blocks.get("PS4Z")
             if ps4z and len(ps4z) >= 44:
                 state["grid_v"] = round(int.from_bytes(ps4z[5:7], "little") / 10.0, 1)
                 state["grid_hz"] = round(int.from_bytes(ps4z[7:9], "little") / 10.0, 1)
@@ -373,7 +460,6 @@ class SolarParser:
                 else:
                     state["dischg_current"] = 0
 
-            sgx0 = blocks.get("Sgx0")
             if sgx0 and len(sgx0) >= 42:
                 state["max_chg"] = int.from_bytes(sgx0[13:15], "little")
                 state["util_chg"] = int.from_bytes(sgx0[17:19], "little")
@@ -388,7 +474,8 @@ class SolarParser:
                     client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
                 log(f"[{datetime.now().strftime('%H:%M:%S')}] Published {len(state)} values to HA")
             else:
-                log("[PARSER] JSON decoded but no known blocks found")
+                found_names = sorted(blocks.keys())
+                log(f"[PARSER] JSON decoded but known blocks not found. discovered={found_names[:20]}")
 
         except Exception as exc:
             log(f"[PARSER ERROR] {exc}")
@@ -466,7 +553,6 @@ def packet_callback(pkt) -> None:
         port = f":{pkt[TCP].dport}" if TCP in pkt else ""
         log(f"[X-RAY] {src_ip} ({src_mac}) -> {dst_ip}{port} [{proto}]")
 
-    # Real inverter -> cloud traffic only
     if src_ip == INVERTER_IP:
         if INV_MAC and src_mac != INV_MAC:
             return
@@ -508,7 +594,6 @@ def packet_callback(pkt) -> None:
 
         return
 
-    # Real router -> inverter traffic only
     if dst_ip == INVERTER_IP:
         if RTR_MAC and src_mac != RTR_MAC:
             return
@@ -562,7 +647,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- PowMr Bridge 2.0.4 ---")
+    log("--- PowMr Bridge 2.0.6 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
