@@ -7,13 +7,17 @@ import threading
 import time
 import warnings
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 from scapy.all import ARP, Ether, IP, Raw, TCP, UDP, AsyncSniffer, getmacbyip, sendp  # type: ignore
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
 
 INVERTER_IP = os.getenv("INVERTER_IP", "192.168.1.139")
 ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")
@@ -40,15 +44,29 @@ AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"powmr/{DEVICE_ID}/availab
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 LOG_VERBOSE = os.getenv("LOG_VERBOSE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
+# -----------------------------------------------------------------------------
+# Runtime state
+# -----------------------------------------------------------------------------
+
 INV_MAC: Optional[str] = None
 RTR_MAC: Optional[str] = None
 RUNNING = True
 DISCOVERY_PUBLISHED = False
 LAST_STATE: Dict[str, object] = {}
-TCP_STREAMS: Dict[Tuple[str, int, str, int], bytearray] = {}
+sniffer: Optional[AsyncSniffer] = None
+
+# Reassembly buffers keyed by TCP flow
+FLOW_BUFFERS: Dict[Tuple[str, int, str, int], bytearray] = {}
+
+# Recent segment signatures so duplicated sniffed packets do not corrupt the stream
+SEGMENT_CACHE: Dict[Tuple[str, int, str, int], Dict[Tuple[int, int, bytes], float]] = {}
+
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
-sniffer: Optional[AsyncSniffer] = None
+
+# -----------------------------------------------------------------------------
+# Sensor definitions
+# -----------------------------------------------------------------------------
 
 SENSORS = {
     "grid_v": {"name": "Grid Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:transmission-tower"},
@@ -88,6 +106,9 @@ MQTT_PACKET_TYPES = {
     14: "DISCONNECT",
 }
 
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
 def log(message: str) -> None:
     print(message, flush=True)
@@ -98,6 +119,10 @@ def send_layer2(frame, iface: Optional[str] = None) -> None:
         sendp(frame, verbose=False, iface=iface)
     else:
         sendp(frame, verbose=False)
+
+
+def mqtt_type_name(first_byte: int) -> str:
+    return MQTT_PACKET_TYPES.get((first_byte >> 4) & 0x0F, f"TYPE_{(first_byte >> 4) & 0x0F}")
 
 
 def create_mqtt_client() -> mqtt.Client:
@@ -120,6 +145,9 @@ def create_mqtt_client() -> mqtt.Client:
 
 client = create_mqtt_client()
 
+# -----------------------------------------------------------------------------
+# MQTT discovery
+# -----------------------------------------------------------------------------
 
 def publish_discovery() -> None:
     global DISCOVERY_PUBLISHED
@@ -187,6 +215,123 @@ def start_mqtt() -> None:
     except Exception as exc:
         log(f"[HA MQTT ERROR] {exc}")
 
+# -----------------------------------------------------------------------------
+# MQTT packet decoding
+# -----------------------------------------------------------------------------
+
+def decode_remaining_length(buf: bytes, start_index: int = 1) -> Tuple[Optional[int], Optional[int]]:
+    multiplier = 1
+    value = 0
+    index = start_index
+
+    while True:
+        if index >= len(buf):
+            return None, None
+
+        encoded = buf[index]
+        value += (encoded & 127) * multiplier
+        index += 1
+
+        if (encoded & 128) == 0:
+            return value, index
+
+        multiplier *= 128
+        if multiplier > 128 * 128 * 128 * 128:
+            raise ValueError("Malformed MQTT remaining length")
+
+
+def is_duplicate_segment(flow_key: Tuple[str, int, str, int], seq: int, payload: bytes) -> bool:
+    now = time.time()
+    cache = SEGMENT_CACHE.setdefault(flow_key, {})
+
+    # prune old entries
+    stale_keys = [k for k, ts in cache.items() if now - ts > 15]
+    for k in stale_keys:
+        del cache[k]
+
+    sig = (seq, len(payload), payload[:16])
+    if sig in cache:
+        return True
+
+    cache[sig] = now
+    return False
+
+
+def extract_mqtt_packets(flow_key: Tuple[str, int, str, int], chunk: bytes) -> List[bytes]:
+    buf = FLOW_BUFFERS.setdefault(flow_key, bytearray())
+    buf.extend(chunk)
+
+    # keep buffer bounded
+    if len(buf) > 1024 * 1024:
+        del buf[:-512 * 1024]
+
+    packets: List[bytes] = []
+
+    while True:
+        if len(buf) < 2:
+            break
+
+        try:
+            remaining_len, header_end = decode_remaining_length(buf, 1)
+        except Exception as exc:
+            log(f"[MQTT ERROR] remaining length decode failed: {exc}")
+            buf.clear()
+            break
+
+        if remaining_len is None or header_end is None:
+            break
+
+        total_len = header_end + remaining_len
+        if len(buf) < total_len:
+            break
+
+        packet = bytes(buf[:total_len])
+        del buf[:total_len]
+        packets.append(packet)
+
+    return packets
+
+
+def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[bytes]]:
+    if not packet:
+        return None, None
+
+    first = packet[0]
+    packet_type = (first >> 4) & 0x0F
+    if packet_type != 3:
+        return None, None
+
+    remaining_len, pos = decode_remaining_length(packet, 1)
+    if remaining_len is None or pos is None:
+        return None, None
+
+    if len(packet) < pos + 2:
+        return None, None
+
+    topic_len = int.from_bytes(packet[pos:pos + 2], "big")
+    pos += 2
+
+    if len(packet) < pos + topic_len:
+        return None, None
+
+    topic = packet[pos:pos + topic_len].decode("utf-8", errors="ignore")
+    pos += topic_len
+
+    qos = (first >> 1) & 0x03
+    if qos > 0:
+        if len(packet) < pos + 2:
+            return topic, None
+        pos += 2  # packet id
+
+    if len(packet) < pos:
+        return topic, None
+
+    payload = packet[pos:]
+    return topic, payload
+
+# -----------------------------------------------------------------------------
+# Payload parsing
+# -----------------------------------------------------------------------------
 
 class SolarParser:
     @staticmethod
@@ -196,10 +341,23 @@ class SolarParser:
 
             idx = payload_bytes.find(b'{"b":')
             if idx == -1:
+                idx = payload_bytes.find(b'"b":')
+                if idx > 0:
+                    payload_bytes = b"{" + payload_bytes[idx:]
+                    idx = 0
+
+            if idx == -1:
                 log("[PARSER] JSON marker not found")
                 return
 
-            raw_json = json.loads(payload_bytes[idx:].decode("utf-8", errors="ignore"))
+            raw = payload_bytes[idx:].decode("utf-8", errors="ignore")
+
+            # trim trailing garbage after the last closing brace
+            end = raw.rfind("}")
+            if end != -1:
+                raw = raw[:end + 1]
+
+            raw_json = json.loads(raw)
             blocks = {}
 
             for item in raw_json.get("b", {}).get("ct", []):
@@ -259,57 +417,9 @@ class SolarParser:
         except Exception as exc:
             log(f"[PARSER ERROR] {exc}")
 
-
-def extract_json_from_stream(flow_key: Tuple[str, int, str, int], chunk: bytes) -> Optional[bytes]:
-    if flow_key not in TCP_STREAMS:
-        TCP_STREAMS[flow_key] = bytearray()
-
-    buf = TCP_STREAMS[flow_key]
-    buf.extend(chunk)
-
-    if len(buf) > 262144:
-        del buf[:-131072]
-
-    start = buf.find(b'{"b":')
-    if start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escape = False
-
-    for i in range(start, len(buf)):
-        c = buf[i]
-
-        if in_string:
-            if escape:
-                escape = False
-            elif c == 92:
-                escape = True
-            elif c == 34:
-                in_string = False
-            continue
-
-        if c == 34:
-            in_string = True
-        elif c == 123:
-            depth += 1
-        elif c == 125:
-            depth -= 1
-            if depth == 0:
-                payload = bytes(buf[start:i + 1])
-                del buf[:i + 1]
-                return payload
-
-    if start > 0:
-        del buf[:start]
-
-    return None
-
-
-def mqtt_type_name(first_byte: int) -> str:
-    return MQTT_PACKET_TYPES.get((first_byte >> 4) & 0x0F, f"TYPE_{(first_byte >> 4) & 0x0F}")
-
+# -----------------------------------------------------------------------------
+# ARP spoofing
+# -----------------------------------------------------------------------------
 
 class ArpSpoofer:
     def resolve_macs(self) -> None:
@@ -351,6 +461,9 @@ class ArpSpoofer:
 
 arp_spoofer = ArpSpoofer()
 
+# -----------------------------------------------------------------------------
+# Packet handling
+# -----------------------------------------------------------------------------
 
 def packet_callback(pkt) -> None:
     global INV_MAC, RTR_MAC
@@ -377,24 +490,35 @@ def packet_callback(pkt) -> None:
         port = f":{pkt[TCP].dport}" if TCP in pkt else ""
         log(f"[X-RAY] {src_ip} ({src_mac}) -> {dst_ip}{port} [{proto}]")
 
-    if src_ip == INVERTER_IP and TCP in pkt:
+    # Inverter outbound MQTT flow
+    if src_ip == INVERTER_IP and TCP in pkt and dst_ip == TARGET_HOST and int(pkt[TCP].dport) == TARGET_PORT:
         if Raw in pkt:
             payload = bytes(pkt[Raw].load)
             if payload:
-                frame_type = mqtt_type_name(payload[0])
-                if LOG_VERBOSE:
-                    log(
-                        f"[MQTT FRAME] {src_ip}:{int(pkt[TCP].sport)} -> "
-                        f"{dst_ip}:{int(pkt[TCP].dport)} "
-                        f"type={frame_type} len={len(payload)} first16={payload[:16].hex()}"
-                    )
+                flow_key = (src_ip, int(pkt[TCP].sport), dst_ip, int(pkt[TCP].dport))
+                seq = int(pkt[TCP].seq)
 
-                if (payload[0] >> 4) == 3:
-                    flow_key = (src_ip, int(pkt[TCP].sport), dst_ip, int(pkt[TCP].dport))
-                    json_payload = extract_json_from_stream(flow_key, payload)
-                    if json_payload:
-                        log(f"[MQTT JSON] len={len(json_payload)}")
-                        SolarParser.parse_payload(json_payload)
+                if is_duplicate_segment(flow_key, seq, payload):
+                    if LOG_VERBOSE:
+                        log(f"[TCP DUP] flow={flow_key} seq={seq} len={len(payload)}")
+                else:
+                    packets = extract_mqtt_packets(flow_key, payload)
+
+                    for packet in packets:
+                        ptype = mqtt_type_name(packet[0])
+                        if LOG_VERBOSE:
+                            log(
+                                f"[MQTT PACKET] {src_ip}:{int(pkt[TCP].sport)} -> "
+                                f"{dst_ip}:{int(pkt[TCP].dport)} type={ptype} len={len(packet)} "
+                                f"first16={packet[:16].hex()}"
+                            )
+
+                        if ((packet[0] >> 4) & 0x0F) == 3:
+                            topic, publish_payload = extract_publish_payload(packet)
+                            if topic is not None:
+                                log(f"[MQTT PUBLISH] topic={topic} payload_len={len(publish_payload or b'')}")
+                            if publish_payload:
+                                SolarParser.parse_payload(publish_payload)
 
         if AUTO_INTERCEPT and RTR_MAC:
             try:
@@ -403,6 +527,7 @@ def packet_callback(pkt) -> None:
             except Exception as exc:
                 log(f"[FWD ERROR] inverter->router {exc}")
 
+    # Router/cloud back to inverter
     elif dst_ip == INVERTER_IP:
         if AUTO_INTERCEPT and INV_MAC:
             try:
@@ -411,6 +536,9 @@ def packet_callback(pkt) -> None:
             except Exception as exc:
                 log(f"[FWD ERROR] router->inverter {exc}")
 
+# -----------------------------------------------------------------------------
+# Shutdown
+# -----------------------------------------------------------------------------
 
 def shutdown(*_args) -> None:
     global RUNNING, sniffer
@@ -439,9 +567,12 @@ def shutdown(*_args) -> None:
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log("--- PowMr Bridge 2.0.1 ---")
+    log("--- PowMr Bridge 2.0.2 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
