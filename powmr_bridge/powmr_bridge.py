@@ -15,16 +15,12 @@ from scapy.all import ARP, Ether, IP, Raw, TCP, UDP, AsyncSniffer, getmacbyip, s
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
-
 INVERTER_IP = os.getenv("INVERTER_IP", "192.168.1.139")
 ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")
 
 TARGET_HOST = os.getenv("TARGET_HOST", "8.212.18.157")
 TARGET_PORT = int(os.getenv("TARGET_PORT", "1883"))
-LISTEN_PORT = int(os.getenv("LISTEN_PORT", "18899"))  # kept for compatibility
+LISTEN_PORT = int(os.getenv("LISTEN_PORT", "18899"))
 
 AUTO_INTERCEPT = os.getenv("AUTO_INTERCEPT", "true").strip().lower() in {"1", "true", "yes", "on"}
 INVERTER_MAC_CFG = os.getenv("INVERTER_MAC", "").strip().lower() or None
@@ -44,10 +40,6 @@ AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"powmr/{DEVICE_ID}/availab
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 LOG_VERBOSE = os.getenv("LOG_VERBOSE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
-# -----------------------------------------------------------------------------
-# Runtime state
-# -----------------------------------------------------------------------------
-
 INV_MAC: Optional[str] = None
 RTR_MAC: Optional[str] = None
 RUNNING = True
@@ -58,141 +50,44 @@ KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
 sniffer: Optional[AsyncSniffer] = None
 
-# -----------------------------------------------------------------------------
-# Sensor definitions
-# -----------------------------------------------------------------------------
-
 SENSORS = {
-    "grid_v": {
-        "name": "Grid Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:transmission-tower",
-    },
-    "grid_hz": {
-        "name": "Grid Frequency",
-        "unit": "Hz",
-        "device_class": "frequency",
-        "state_class": "measurement",
-        "icon": "mdi:current-ac",
-    },
-    "out_v": {
-        "name": "Output Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:power-plug",
-    },
-    "out_hz": {
-        "name": "Output Frequency",
-        "unit": "Hz",
-        "device_class": "frequency",
-        "state_class": "measurement",
-        "icon": "mdi:current-ac",
-    },
-    "load_w": {
-        "name": "Active Load",
-        "unit": "W",
-        "device_class": "power",
-        "state_class": "measurement",
-        "icon": "mdi:home-lightning-bolt",
-    },
-    "apparent_va": {
-        "name": "Apparent Load",
-        "unit": "VA",
-        "device_class": "apparent_power",
-        "state_class": "measurement",
-        "icon": "mdi:flash",
-    },
-    "load_pct": {
-        "name": "Load Percentage",
-        "unit": "%",
-        "state_class": "measurement",
-        "icon": "mdi:gauge",
-    },
-    "bat_v": {
-        "name": "Battery Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery",
-    },
-    "bat_cap": {
-        "name": "Battery Capacity",
-        "unit": "%",
-        "device_class": "battery",
-        "state_class": "measurement",
-        "icon": "mdi:battery-high",
-    },
-    "dischg_current": {
-        "name": "Battery Discharge Current",
-        "unit": "A",
-        "device_class": "current",
-        "state_class": "measurement",
-        "icon": "mdi:battery-minus",
-    },
-    "bat_temp": {
-        "name": "Inverter Temperature",
-        "unit": "°C",
-        "device_class": "temperature",
-        "state_class": "measurement",
-        "icon": "mdi:thermometer",
-    },
-    "pv_w": {
-        "name": "PV Power",
-        "unit": "W",
-        "device_class": "power",
-        "state_class": "measurement",
-        "icon": "mdi:solar-power",
-    },
-    "pv_v": {
-        "name": "PV Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:solar-panel",
-    },
-    "max_chg": {
-        "name": "Max Charge Current",
-        "unit": "A",
-        "device_class": "current",
-        "state_class": "measurement",
-        "icon": "mdi:current-dc",
-    },
-    "util_chg": {
-        "name": "Utility Charge Current",
-        "unit": "A",
-        "device_class": "current",
-        "state_class": "measurement",
-        "icon": "mdi:current-dc",
-    },
-    "bulk_v": {
-        "name": "Bulk Charging Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery-charging-high",
-    },
-    "float_v": {
-        "name": "Float Charging Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery-charging-medium",
-    },
-    "cut_v": {
-        "name": "Low Battery Cut-off",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery-off-outline",
-    },
+    "grid_v": {"name": "Grid Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:transmission-tower"},
+    "grid_hz": {"name": "Grid Frequency", "unit": "Hz", "device_class": "frequency", "state_class": "measurement", "icon": "mdi:current-ac"},
+    "out_v": {"name": "Output Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:power-plug"},
+    "out_hz": {"name": "Output Frequency", "unit": "Hz", "device_class": "frequency", "state_class": "measurement", "icon": "mdi:current-ac"},
+    "load_w": {"name": "Active Load", "unit": "W", "device_class": "power", "state_class": "measurement", "icon": "mdi:home-lightning-bolt"},
+    "apparent_va": {"name": "Apparent Load", "unit": "VA", "device_class": "apparent_power", "state_class": "measurement", "icon": "mdi:flash"},
+    "load_pct": {"name": "Load Percentage", "unit": "%", "state_class": "measurement", "icon": "mdi:gauge"},
+    "bat_v": {"name": "Battery Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery"},
+    "bat_cap": {"name": "Battery Capacity", "unit": "%", "device_class": "battery", "state_class": "measurement", "icon": "mdi:battery-high"},
+    "dischg_current": {"name": "Battery Discharge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:battery-minus"},
+    "bat_temp": {"name": "Inverter Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer"},
+    "pv_w": {"name": "PV Power", "unit": "W", "device_class": "power", "state_class": "measurement", "icon": "mdi:solar-power"},
+    "pv_v": {"name": "PV Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:solar-panel"},
+    "max_chg": {"name": "Max Charge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:current-dc"},
+    "util_chg": {"name": "Utility Charge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:current-dc"},
+    "bulk_v": {"name": "Bulk Charging Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-charging-high"},
+    "float_v": {"name": "Float Charging Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-charging-medium"},
+    "cut_v": {"name": "Low Battery Cut-off", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-off-outline"},
 }
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
+MQTT_PACKET_TYPES = {
+    1: "CONNECT",
+    2: "CONNACK",
+    3: "PUBLISH",
+    4: "PUBACK",
+    5: "PUBREC",
+    6: "PUBREL",
+    7: "PUBCOMP",
+    8: "SUBSCRIBE",
+    9: "SUBACK",
+    10: "UNSUBSCRIBE",
+    11: "UNSUBACK",
+    12: "PINGREQ",
+    13: "PINGRESP",
+    14: "DISCONNECT",
+}
+
 
 def log(message: str) -> None:
     print(message, flush=True)
@@ -208,7 +103,7 @@ def send_layer2(frame, iface: Optional[str] = None) -> None:
 def create_mqtt_client() -> mqtt.Client:
     try:
         client = mqtt.Client(
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION1,  # paho-mqtt v2
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
             client_id=f"{DEVICE_ID}_bridge",
             protocol=mqtt.MQTTv311,
         )
@@ -225,9 +120,6 @@ def create_mqtt_client() -> mqtt.Client:
 
 client = create_mqtt_client()
 
-# -----------------------------------------------------------------------------
-# MQTT discovery
-# -----------------------------------------------------------------------------
 
 def publish_discovery() -> None:
     global DISCOVERY_PUBLISHED
@@ -295,9 +187,6 @@ def start_mqtt() -> None:
     except Exception as exc:
         log(f"[HA MQTT ERROR] {exc}")
 
-# -----------------------------------------------------------------------------
-# Payload parsing
-# -----------------------------------------------------------------------------
 
 class SolarParser:
     @staticmethod
@@ -372,16 +261,12 @@ class SolarParser:
 
 
 def extract_json_from_stream(flow_key: Tuple[str, int, str, int], chunk: bytes) -> Optional[bytes]:
-    """
-    Reassemble TCP payload chunks and extract a single JSON object that starts with {"b":
-    """
     if flow_key not in TCP_STREAMS:
         TCP_STREAMS[flow_key] = bytearray()
 
     buf = TCP_STREAMS[flow_key]
     buf.extend(chunk)
 
-    # Prevent unbounded growth
     if len(buf) > 262144:
         del buf[:-131072]
 
@@ -399,32 +284,32 @@ def extract_json_from_stream(flow_key: Tuple[str, int, str, int], chunk: bytes) 
         if in_string:
             if escape:
                 escape = False
-            elif c == 92:   # backslash
+            elif c == 92:
                 escape = True
-            elif c == 34:   # "
+            elif c == 34:
                 in_string = False
             continue
 
-        if c == 34:         # "
+        if c == 34:
             in_string = True
-        elif c == 123:      # {
+        elif c == 123:
             depth += 1
-        elif c == 125:      # }
+        elif c == 125:
             depth -= 1
             if depth == 0:
                 payload = bytes(buf[start:i + 1])
                 del buf[:i + 1]
                 return payload
 
-    # Drop leading junk before JSON start
     if start > 0:
         del buf[:start]
 
     return None
 
-# -----------------------------------------------------------------------------
-# ARP spoofing
-# -----------------------------------------------------------------------------
+
+def mqtt_type_name(first_byte: int) -> str:
+    return MQTT_PACKET_TYPES.get((first_byte >> 4) & 0x0F, f"TYPE_{(first_byte >> 4) & 0x0F}")
+
 
 class ArpSpoofer:
     def resolve_macs(self) -> None:
@@ -456,14 +341,8 @@ class ArpSpoofer:
 
         while RUNNING:
             try:
-                send_layer2(
-                    Ether(dst=INV_MAC) / ARP(op=2, pdst=INVERTER_IP, psrc=ROUTER_IP, hwdst=INV_MAC),
-                    SNIFF_IFACE,
-                )
-                send_layer2(
-                    Ether(dst=RTR_MAC) / ARP(op=2, pdst=ROUTER_IP, psrc=INVERTER_IP, hwdst=RTR_MAC),
-                    SNIFF_IFACE,
-                )
+                send_layer2(Ether(dst=INV_MAC) / ARP(op=2, pdst=INVERTER_IP, psrc=ROUTER_IP, hwdst=INV_MAC), SNIFF_IFACE)
+                send_layer2(Ether(dst=RTR_MAC) / ARP(op=2, pdst=ROUTER_IP, psrc=INVERTER_IP, hwdst=RTR_MAC), SNIFF_IFACE)
             except Exception as exc:
                 log(f"[ARP ERROR] {exc}")
 
@@ -472,9 +351,6 @@ class ArpSpoofer:
 
 arp_spoofer = ArpSpoofer()
 
-# -----------------------------------------------------------------------------
-# Packet handling
-# -----------------------------------------------------------------------------
 
 def packet_callback(pkt) -> None:
     global INV_MAC, RTR_MAC
@@ -486,7 +362,6 @@ def packet_callback(pkt) -> None:
     src_ip = pkt[IP].src
     dst_ip = pkt[IP].dst
 
-    # Learn MACs dynamically, but do not trust them as hard filters
     if src_ip == INVERTER_IP:
         KNOWN_INVERTER_MACS.add(src_mac)
         if not INV_MAC:
@@ -502,22 +377,24 @@ def packet_callback(pkt) -> None:
         port = f":{pkt[TCP].dport}" if TCP in pkt else ""
         log(f"[X-RAY] {src_ip} ({src_mac}) -> {dst_ip}{port} [{proto}]")
 
-    # Inverter -> cloud MQTT
-    if src_ip == INVERTER_IP and TCP in pkt and dst_ip == TARGET_HOST and pkt[TCP].dport == TARGET_PORT:
+    if src_ip == INVERTER_IP and TCP in pkt:
         if Raw in pkt:
             payload = bytes(pkt[Raw].load)
             if payload:
+                frame_type = mqtt_type_name(payload[0])
                 if LOG_VERBOSE:
-                    head = payload[:16].hex()
-                    log(f"[MQTT RAW] len={len(payload)} first16={head}")
+                    log(
+                        f"[MQTT FRAME] {src_ip}:{int(pkt[TCP].sport)} -> "
+                        f"{dst_ip}:{int(pkt[TCP].dport)} "
+                        f"type={frame_type} len={len(payload)} first16={payload[:16].hex()}"
+                    )
 
-                flow_key = (src_ip, int(pkt[TCP].sport), dst_ip, int(pkt[TCP].dport))
-                json_payload = extract_json_from_stream(flow_key, payload)
-
-                if json_payload:
-                    if LOG_VERBOSE:
+                if (payload[0] >> 4) == 3:
+                    flow_key = (src_ip, int(pkt[TCP].sport), dst_ip, int(pkt[TCP].dport))
+                    json_payload = extract_json_from_stream(flow_key, payload)
+                    if json_payload:
                         log(f"[MQTT JSON] len={len(json_payload)}")
-                    SolarParser.parse_payload(json_payload)
+                        SolarParser.parse_payload(json_payload)
 
         if AUTO_INTERCEPT and RTR_MAC:
             try:
@@ -526,7 +403,6 @@ def packet_callback(pkt) -> None:
             except Exception as exc:
                 log(f"[FWD ERROR] inverter->router {exc}")
 
-    # Router/cloud -> inverter
     elif dst_ip == INVERTER_IP:
         if AUTO_INTERCEPT and INV_MAC:
             try:
@@ -535,9 +411,6 @@ def packet_callback(pkt) -> None:
             except Exception as exc:
                 log(f"[FWD ERROR] router->inverter {exc}")
 
-# -----------------------------------------------------------------------------
-# Shutdown
-# -----------------------------------------------------------------------------
 
 def shutdown(*_args) -> None:
     global RUNNING, sniffer
@@ -566,12 +439,9 @@ def shutdown(*_args) -> None:
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-# -----------------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log("--- PowMr Bridge 2.0.0 ---")
+    log("--- PowMr Bridge 2.0.1 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
@@ -582,7 +452,6 @@ if __name__ == "__main__":
 
     if AUTO_INTERCEPT:
         threading.Thread(target=arp_spoofer.run, daemon=True).start()
-        # Give ARP some time to resolve MACs
         wait_start = time.time()
         while RUNNING and time.time() - wait_start < 15 and (not INV_MAC or not RTR_MAC):
             time.sleep(1)
