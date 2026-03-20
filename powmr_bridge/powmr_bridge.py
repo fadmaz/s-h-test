@@ -15,10 +15,6 @@ from scapy.all import ARP, Ether, IP, Raw, TCP, UDP, AsyncSniffer, getmacbyip, s
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
-
 INVERTER_IP = os.getenv("INVERTER_IP", "192.168.1.139")
 ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")
 
@@ -44,10 +40,6 @@ AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"powmr/{DEVICE_ID}/availab
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 LOG_VERBOSE = os.getenv("LOG_VERBOSE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
-# -----------------------------------------------------------------------------
-# Runtime state
-# -----------------------------------------------------------------------------
-
 INV_MAC: Optional[str] = None
 RTR_MAC: Optional[str] = None
 RUNNING = True
@@ -55,18 +47,12 @@ DISCOVERY_PUBLISHED = False
 LAST_STATE: Dict[str, object] = {}
 sniffer: Optional[AsyncSniffer] = None
 
-# Reassembly buffers keyed by TCP flow
 FLOW_BUFFERS: Dict[Tuple[str, int, str, int], bytearray] = {}
-
-# Recent segment signatures so duplicated sniffed packets do not corrupt the stream
 SEGMENT_CACHE: Dict[Tuple[str, int, str, int], Dict[Tuple[int, int, bytes], float]] = {}
 
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
-
-# -----------------------------------------------------------------------------
-# Sensor definitions
-# -----------------------------------------------------------------------------
+LAST_PACKET_TS = 0.0
 
 SENSORS = {
     "grid_v": {"name": "Grid Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:transmission-tower"},
@@ -106,12 +92,15 @@ MQTT_PACKET_TYPES = {
     14: "DISCONNECT",
 }
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
 
 def log(message: str) -> None:
     print(message, flush=True)
+
+
+def norm_mac(mac: Optional[str]) -> Optional[str]:
+    if not mac:
+        return None
+    return mac.strip().lower().replace("-", ":")
 
 
 def send_layer2(frame, iface: Optional[str] = None) -> None:
@@ -145,9 +134,6 @@ def create_mqtt_client() -> mqtt.Client:
 
 client = create_mqtt_client()
 
-# -----------------------------------------------------------------------------
-# MQTT discovery
-# -----------------------------------------------------------------------------
 
 def publish_discovery() -> None:
     global DISCOVERY_PUBLISHED
@@ -215,9 +201,6 @@ def start_mqtt() -> None:
     except Exception as exc:
         log(f"[HA MQTT ERROR] {exc}")
 
-# -----------------------------------------------------------------------------
-# MQTT packet decoding
-# -----------------------------------------------------------------------------
 
 def decode_remaining_length(buf: bytes, start_index: int = 1) -> Tuple[Optional[int], Optional[int]]:
     multiplier = 1
@@ -244,7 +227,6 @@ def is_duplicate_segment(flow_key: Tuple[str, int, str, int], seq: int, payload:
     now = time.time()
     cache = SEGMENT_CACHE.setdefault(flow_key, {})
 
-    # prune old entries
     stale_keys = [k for k, ts in cache.items() if now - ts > 15]
     for k in stale_keys:
         del cache[k]
@@ -261,7 +243,6 @@ def extract_mqtt_packets(flow_key: Tuple[str, int, str, int], chunk: bytes) -> L
     buf = FLOW_BUFFERS.setdefault(flow_key, bytearray())
     buf.extend(chunk)
 
-    # keep buffer bounded
     if len(buf) > 1024 * 1024:
         del buf[:-512 * 1024]
 
@@ -321,7 +302,7 @@ def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[byte
     if qos > 0:
         if len(packet) < pos + 2:
             return topic, None
-        pos += 2  # packet id
+        pos += 2
 
     if len(packet) < pos:
         return topic, None
@@ -329,9 +310,6 @@ def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[byte
     payload = packet[pos:]
     return topic, payload
 
-# -----------------------------------------------------------------------------
-# Payload parsing
-# -----------------------------------------------------------------------------
 
 class SolarParser:
     @staticmethod
@@ -351,8 +329,6 @@ class SolarParser:
                 return
 
             raw = payload_bytes[idx:].decode("utf-8", errors="ignore")
-
-            # trim trailing garbage after the last closing brace
             end = raw.rfind("}")
             if end != -1:
                 raw = raw[:end + 1]
@@ -417,22 +393,19 @@ class SolarParser:
         except Exception as exc:
             log(f"[PARSER ERROR] {exc}")
 
-# -----------------------------------------------------------------------------
-# ARP spoofing
-# -----------------------------------------------------------------------------
 
 class ArpSpoofer:
     def resolve_macs(self) -> None:
         global INV_MAC, RTR_MAC
 
-        INV_MAC = INVERTER_MAC_CFG or INV_MAC
-        RTR_MAC = ROUTER_MAC_CFG or RTR_MAC
+        INV_MAC = norm_mac(INVERTER_MAC_CFG) or INV_MAC
+        RTR_MAC = norm_mac(ROUTER_MAC_CFG) or RTR_MAC
 
         while RUNNING and (not INV_MAC or not RTR_MAC):
             if not INV_MAC:
-                INV_MAC = getmacbyip(INVERTER_IP)
+                INV_MAC = norm_mac(getmacbyip(INVERTER_IP))
             if not RTR_MAC:
-                RTR_MAC = getmacbyip(ROUTER_IP)
+                RTR_MAC = norm_mac(getmacbyip(ROUTER_IP))
 
             if not INV_MAC or not RTR_MAC:
                 log("[ARP] Waiting for MAC addresses...")
@@ -461,17 +434,16 @@ class ArpSpoofer:
 
 arp_spoofer = ArpSpoofer()
 
-# -----------------------------------------------------------------------------
-# Packet handling
-# -----------------------------------------------------------------------------
 
 def packet_callback(pkt) -> None:
-    global INV_MAC, RTR_MAC
+    global INV_MAC, RTR_MAC, LAST_PACKET_TS
+
+    LAST_PACKET_TS = time.time()
 
     if IP not in pkt or Ether not in pkt:
         return
 
-    src_mac = pkt[Ether].src.lower()
+    src_mac = norm_mac(pkt[Ether].src.lower())
     src_ip = pkt[IP].src
     dst_ip = pkt[IP].dst
 
@@ -490,7 +462,6 @@ def packet_callback(pkt) -> None:
         port = f":{pkt[TCP].dport}" if TCP in pkt else ""
         log(f"[X-RAY] {src_ip} ({src_mac}) -> {dst_ip}{port} [{proto}]")
 
-    # Inverter outbound MQTT flow
     if src_ip == INVERTER_IP and TCP in pkt and dst_ip == TARGET_HOST and int(pkt[TCP].dport) == TARGET_PORT:
         if Raw in pkt:
             payload = bytes(pkt[Raw].load)
@@ -527,7 +498,6 @@ def packet_callback(pkt) -> None:
             except Exception as exc:
                 log(f"[FWD ERROR] inverter->router {exc}")
 
-    # Router/cloud back to inverter
     elif dst_ip == INVERTER_IP:
         if AUTO_INTERCEPT and INV_MAC:
             try:
@@ -536,9 +506,16 @@ def packet_callback(pkt) -> None:
             except Exception as exc:
                 log(f"[FWD ERROR] router->inverter {exc}")
 
-# -----------------------------------------------------------------------------
-# Shutdown
-# -----------------------------------------------------------------------------
+
+def health_logger() -> None:
+    while RUNNING:
+        time.sleep(30)
+        age = time.time() - LAST_PACKET_TS if LAST_PACKET_TS else -1
+        if age < 0:
+            log("[HEALTH] No packets captured yet")
+        else:
+            log(f"[HEALTH] Last packet seen {int(age)}s ago; inverter_macs={sorted(x for x in KNOWN_INVERTER_MACS if x)}")
+
 
 def shutdown(*_args) -> None:
     global RUNNING, sniffer
@@ -567,17 +544,13 @@ def shutdown(*_args) -> None:
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-# -----------------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log("--- PowMr Bridge 2.0.2 ---")
+    log("--- PowMr Bridge 2.0.3 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
-    if SNIFF_IFACE:
-        log(f"[Config] SNIFF_IFACE={SNIFF_IFACE}")
+    log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
 
     start_mqtt()
 
@@ -587,9 +560,11 @@ if __name__ == "__main__":
         while RUNNING and time.time() - wait_start < 15 and (not INV_MAC or not RTR_MAC):
             time.sleep(1)
     else:
-        INV_MAC = INVERTER_MAC_CFG
-        RTR_MAC = ROUTER_MAC_CFG
+        INV_MAC = norm_mac(INVERTER_MAC_CFG)
+        RTR_MAC = norm_mac(ROUTER_MAC_CFG)
         log("[ARP] AUTO_INTERCEPT disabled; relying on existing network redirection")
+
+    threading.Thread(target=health_logger, daemon=True).start()
 
     sniff_kwargs = {
         "filter": f"ip host {INVERTER_IP}",
