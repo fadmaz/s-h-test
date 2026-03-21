@@ -81,6 +81,8 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "out_hz": sensor("Output Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
     "apparent_va": sensor("Output Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
     "load_w": sensor("Output Active Power", unit="W", device_class="power", state_class="measurement", icon="mdi:home-lightning-bolt"),
+    "load_pct": sensor("Output Load Percentage", unit="%", state_class="measurement", icon="mdi:gauge"),
+    "output_dc_comp": sensor("Output DC Compensator", state_class="measurement", icon="mdi:tune-variant"),
 
     # Battery
     "bat_v": sensor("Battery Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery"),
@@ -90,6 +92,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "dischg_current": sensor("Battery Discharge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:battery-minus"),
     "bat_temp": sensor("Inverter Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
     "max_chg": sensor("Max Charge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
+    "util_chg": sensor("Utility Charge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
     "bulk_v": sensor("Bulk Charging Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-high"),
     "float_v": sensor("Float Charging Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-medium"),
     "cut_v": sensor("Low Battery Cut-off", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-off-outline"),
@@ -533,42 +536,47 @@ class SolarParser:
         if "hR6Y" in parsed:
             state["firmware_info"] = parsed["hR6Y"][0]
 
-        # Output / load block
+        # Grid / mains block - best match to app screenshot
         vals = parsed.get("2l0E", ("", []))[1]
-        if len(vals) >= 4:
-            out_v = SolarParser._to_float(vals[0])
-            out_hz = SolarParser._to_float(vals[1])
-            out_va = SolarParser._to_int(vals[2])
-            out_w = SolarParser._to_int(vals[3])
-
-            if out_v is not None:
-                state["out_v"] = round(out_v, 1)
-            if out_hz is not None:
-                state["out_hz"] = round(out_hz, 1)
-            if out_va is not None:
-                state["apparent_va"] = out_va
-            if out_w is not None:
-                state["load_w"] = out_w
-
-        # Grid / mains block
-        vals = parsed.get("WdRR", ("", []))[1]
         if len(vals) >= 2:
             grid_v = SolarParser._to_float(vals[0])
             grid_hz = SolarParser._to_float(vals[1])
-
             if grid_v is not None:
                 state["grid_v"] = round(grid_v, 1)
             if grid_hz is not None:
                 state["grid_hz"] = round(grid_hz, 1)
-
         if len(vals) >= 4:
             mains_va = SolarParser._to_int(vals[2])
             mains_w = SolarParser._to_int(vals[3])
-
             if mains_va is not None:
                 state["mains_apparent_va"] = mains_va
             if mains_w is not None:
                 state["mains_power_w"] = mains_w
+
+        # Output / load block - best match to app screenshot
+        vals = parsed.get("WdRR", ("", []))[1]
+        if len(vals) >= 2:
+            out_v = SolarParser._to_float(vals[0])
+            out_hz = SolarParser._to_float(vals[1])
+            if out_v is not None:
+                state["out_v"] = round(out_v, 1)
+            if out_hz is not None:
+                state["out_hz"] = round(out_hz, 1)
+        if len(vals) >= 4:
+            out_va = SolarParser._to_int(vals[2])
+            out_w = SolarParser._to_int(vals[3])
+            if out_va is not None:
+                state["apparent_va"] = out_va
+            if out_w is not None:
+                state["load_w"] = out_w
+        if len(vals) >= 5:
+            load_pct = SolarParser._to_int(vals[4])
+            if load_pct is not None:
+                state["load_pct"] = load_pct
+        if len(vals) >= 6:
+            dc_comp = SolarParser._to_int(vals[5])
+            if dc_comp is not None:
+                state["output_dc_comp"] = dc_comp
 
         # Battery block
         vals = parsed.get("2ONL", ("", []))[1]
@@ -611,18 +619,17 @@ class SolarParser:
         # PV2 block
         vals = parsed.get("noeP", ("", []))[1]
         if len(vals) >= 5:
-            # best current match from your app screenshots
-            pv2_current = SolarParser._to_float(vals[3])
+            # observed pattern like: 000.0 00.0 00000 0 080.0
+            pv2_current = SolarParser._to_float(vals[1])
+            pv2_power = SolarParser._to_int(vals[2])
             pv2_voltage = SolarParser._to_float(vals[4])
 
             if pv2_current is not None:
                 state["pv2_current_a"] = round(pv2_current, 1)
-            if pv2_voltage is not None:
-                state["pv2_v"] = round(pv2_voltage, 1)
-
-            pv2_power = SolarParser._to_int(vals[2])
             if pv2_power is not None:
                 state["pv2_power_w"] = pv2_power
+            if pv2_voltage is not None:
+                state["pv2_v"] = round(pv2_voltage, 1)
 
         # Temperature block
         vals = parsed.get("V4W3", ("", []))[1]
@@ -654,6 +661,13 @@ class SolarParser:
                 state["float_v"] = round(float_v, 1)
             if bulk_v is not None:
                 state["bulk_v"] = round(bulk_v, 1)
+
+        # Additional settings-ish block: best-effort utility charge current
+        vals = parsed.get("93VQ", ("", []))[1]
+        if len(vals) >= 11:
+            util_chg = SolarParser._to_int(vals[10])
+            if util_chg is not None and 0 <= util_chg <= 200:
+                state["util_chg"] = util_chg
 
         # Energy counters
         vals = parsed.get("COST", ("", []))[1]
@@ -691,7 +705,7 @@ class SolarParser:
             raw = payload_bytes[idx:].decode("utf-8", errors="ignore")
             end = raw.rfind("}")
             if end != -1:
-                raw = raw[:end + 1]
+                raw = raw[: end + 1]
 
             raw_json = json.loads(raw)
             candidate_pairs = SolarParser._walk_for_blocks(raw_json)
@@ -703,7 +717,7 @@ class SolarParser:
                 if not key:
                     continue
 
-                dedupe_key = (key, encoded[:32])
+                    dedupe_key = (key, encoded[:32])
                 if dedupe_key in seen:
                     continue
                 seen.add(dedupe_key)
@@ -885,7 +899,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.2.6 ---")
+    log("--- Inverter Bridge 2.2.7 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
