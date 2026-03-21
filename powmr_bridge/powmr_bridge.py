@@ -69,6 +69,9 @@ SENSORS: Dict[str, Dict[str, object]] = {
     # Info
     "model_code": sensor("Model Code", icon="mdi:identifier"),
     "firmware_info": sensor("Firmware Info", icon="mdi:chip"),
+    "firmware_version": sensor("Firmware Version", icon="mdi:chip"),
+    "firmware_build_date": sensor("Firmware Build Date", icon="mdi:calendar"),
+    "firmware_build_slot": sensor("Firmware Build Slot", icon="mdi:counter"),
 
     # Grid
     "grid_v": sensor("Grid Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:transmission-tower"),
@@ -439,6 +442,18 @@ class SolarParser:
         return text, cleaned
 
     @staticmethod
+    def _clean_model_code(text: str) -> str:
+        text = text.replace("(", "").replace("\r", " ").replace("\n", " ").replace("\x00", " ").strip()
+        parts = [p for p in text.split() if p]
+        return parts[0] if parts else text
+
+    @staticmethod
+    def _format_fw_date(raw_date: str) -> str:
+        if len(raw_date) == 8 and raw_date.isdigit():
+            return f"{raw_date[0:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+        return raw_date
+
+    @staticmethod
     def _to_float(token: str) -> Optional[float]:
         try:
             cleaned = "".join(ch for ch in token if ch.isdigit() or ch in ".-")
@@ -457,6 +472,14 @@ class SolarParser:
             return int(cleaned)
         except Exception:
             return None
+
+    @staticmethod
+    def _scale_load_pct(value: Optional[int]) -> Optional[float]:
+        if value is None:
+            return None
+        if value >= 10:
+            return round(value / 10.0, 1)
+        return float(value)
 
     @staticmethod
     def _parse_cost_energy(tokens: List[str]) -> Dict[str, object]:
@@ -532,11 +555,21 @@ class SolarParser:
 
         # Info
         if "SUCV" in parsed:
-            state["model_code"] = parsed["SUCV"][0]
-        if "hR6Y" in parsed:
-            state["firmware_info"] = parsed["hR6Y"][0]
+            state["model_code"] = SolarParser._clean_model_code(parsed["SUCV"][0])
 
-        # Grid / mains block - best match to app
+        if "hR6Y" in parsed:
+            raw_fw, fw_tokens = parsed["hR6Y"]
+            raw_fw_clean = raw_fw.replace("(", "").strip()
+            state["firmware_info"] = raw_fw_clean
+
+            if len(fw_tokens) >= 1:
+                state["firmware_version"] = fw_tokens[0]
+            if len(fw_tokens) >= 2:
+                state["firmware_build_date"] = SolarParser._format_fw_date(fw_tokens[1])
+            if len(fw_tokens) >= 3:
+                state["firmware_build_slot"] = fw_tokens[2]
+
+        # Grid / mains block
         vals = parsed.get("2l0E", ("", []))[1]
         if len(vals) >= 2:
             grid_v = SolarParser._to_float(vals[0])
@@ -553,7 +586,7 @@ class SolarParser:
             if mains_w is not None:
                 state["mains_power_w"] = mains_w
 
-        # Output / load block - best match to app
+        # Output / load block
         vals = parsed.get("WdRR", ("", []))[1]
         if len(vals) >= 2:
             out_v = SolarParser._to_float(vals[0])
@@ -570,7 +603,8 @@ class SolarParser:
             if out_w is not None:
                 state["load_w"] = out_w
         if len(vals) >= 5:
-            load_pct = SolarParser._to_int(vals[4])
+            load_pct_raw = SolarParser._to_int(vals[4])
+            load_pct = SolarParser._scale_load_pct(load_pct_raw)
             if load_pct is not None:
                 state["load_pct"] = load_pct
         if len(vals) >= 6:
@@ -592,15 +626,19 @@ class SolarParser:
             if bat_cap is not None:
                 state["bat_cap"] = bat_cap
 
-        if len(vals) >= 4:
-            charge_a = SolarParser._to_float(vals[3])
-            if charge_a is not None:
-                state["bat_charge_current"] = round(charge_a, 1)
+        extra_currents: List[float] = []
+        for tok in vals[3:]:
+            cur = SolarParser._to_float(tok)
+            if cur is not None:
+                extra_currents.append(cur)
 
-        if len(vals) >= 5:
-            dischg_a = SolarParser._to_float(vals[4])
-            if dischg_a is not None:
-                state["dischg_current"] = round(dischg_a, 1)
+        if len(extra_currents) >= 2:
+            # Observed from your inverter/app: the last two battery values align better as:
+            # second-last = discharge current, last = charging current
+            state["dischg_current"] = round(extra_currents[-2], 1)
+            state["bat_charge_current"] = round(extra_currents[-1], 1)
+        elif len(extra_currents) == 1:
+            state["bat_charge_current"] = round(extra_currents[0], 1)
 
         # PV1 block
         vals = parsed.get("Mpod", ("", []))[1]
@@ -619,7 +657,6 @@ class SolarParser:
         # PV2 block
         vals = parsed.get("noeP", ("", []))[1]
         if len(vals) >= 5:
-            # observed pattern like: 000.0 00.0 00000 0 080.0
             pv2_current = SolarParser._to_float(vals[1])
             pv2_power = SolarParser._to_int(vals[2])
             pv2_voltage = SolarParser._to_float(vals[4])
@@ -662,7 +699,7 @@ class SolarParser:
             if bulk_v is not None:
                 state["bulk_v"] = round(bulk_v, 1)
 
-        # Additional settings-ish block: best-effort utility charge current
+        # Additional block: best-effort utility charge current
         vals = parsed.get("93VQ", ("", []))[1]
         if len(vals) >= 11:
             util_chg = SolarParser._to_int(vals[10])
@@ -901,7 +938,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.2.8 ---")
+    log("--- Inverter Bridge 2.3.0 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
