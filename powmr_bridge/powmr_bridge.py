@@ -33,7 +33,11 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 MQTT_DISCOVERY_PREFIX = os.getenv("MQTT_DISCOVERY_PREFIX", "homeassistant")
 DEVICE_ID = os.getenv("DEVICE_ID", "powmr_rwb1")
-DEVICE_NAME = os.getenv("DEVICE_NAME", "PowMr 6.2kW Inverter")
+DEVICE_NAME = os.getenv("DEVICE_NAME", "Taico inverter 1")
+MODEL_NAME = os.getenv("MODEL_NAME", DEVICE_NAME)
+MANUFACTURER = os.getenv("MANUFACTURER", "Taico")
+ENTITY_PREFIX = os.getenv("ENTITY_PREFIX", "").strip()
+
 STATE_TOPIC = os.getenv("STATE_TOPIC", f"powmr/{DEVICE_ID}/state")
 AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"powmr/{DEVICE_ID}/availability")
 
@@ -55,193 +59,50 @@ KNOWN_ROUTER_MACS = set()
 LAST_PACKET_TS = 0.0
 
 SENSORS: Dict[str, Dict[str, object]] = {
-    "grid_v": {
-        "name": "Grid Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:transmission-tower",
-    },
-    "grid_hz": {
-        "name": "Grid Frequency",
-        "unit": "Hz",
-        "device_class": "frequency",
-        "state_class": "measurement",
-        "icon": "mdi:current-ac",
-    },
-    "out_v": {
-        "name": "Output Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:power-plug",
-    },
-    "out_hz": {
-        "name": "Output Frequency",
-        "unit": "Hz",
-        "device_class": "frequency",
-        "state_class": "measurement",
-        "icon": "mdi:current-ac",
-    },
-    "load_w": {
-        "name": "Active Load",
-        "unit": "W",
-        "device_class": "power",
-        "state_class": "measurement",
-        "icon": "mdi:home-lightning-bolt",
-    },
-    "apparent_va": {
-        "name": "Apparent Load",
-        "unit": "VA",
-        "device_class": "apparent_power",
-        "state_class": "measurement",
-        "icon": "mdi:flash",
-    },
-    "bat_v": {
-        "name": "Battery Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery",
-    },
-    "bat_cap": {
-        "name": "Battery Capacity",
-        "unit": "%",
-        "device_class": "battery",
-        "state_class": "measurement",
-        "icon": "mdi:battery-high",
-    },
-    "dischg_current": {
-        "name": "Battery Discharge Current",
-        "unit": "A",
-        "device_class": "current",
-        "state_class": "measurement",
-        "icon": "mdi:battery-minus",
-    },
-    "bat_temp": {
-        "name": "Inverter Temperature",
-        "unit": "°C",
-        "device_class": "temperature",
-        "state_class": "measurement",
-        "icon": "mdi:thermometer",
-    },
-    "pv_w": {
-        "name": "PV Power",
-        "unit": "W",
-        "device_class": "power",
-        "state_class": "measurement",
-        "icon": "mdi:solar-power",
-    },
-    "pv_v": {
-        "name": "PV Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:solar-panel",
-    },
-    "max_chg": {
-        "name": "Max Charge Current",
-        "unit": "A",
-        "device_class": "current",
-        "state_class": "measurement",
-        "icon": "mdi:current-dc",
-    },
-    "util_chg": {
-        "name": "Utility Charge Current",
-        "unit": "A",
-        "device_class": "current",
-        "state_class": "measurement",
-        "icon": "mdi:current-dc",
-    },
-    "bulk_v": {
-        "name": "Bulk Charging Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery-charging-high",
-    },
-    "float_v": {
-        "name": "Float Charging Voltage",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery-charging-medium",
-    },
-    "cut_v": {
-        "name": "Low Battery Cut-off",
-        "unit": "V",
-        "device_class": "voltage",
-        "state_class": "measurement",
-        "icon": "mdi:battery-off-outline",
-    },
-    "pv_today_kwh": {
-        "name": "PV Today Energy",
-        "unit": "kWh",
-        "device_class": "energy",
-        "icon": "mdi:solar-power-variant",
-    },
-    "pv_month_kwh": {
-        "name": "PV Month Energy",
-        "unit": "kWh",
-        "device_class": "energy",
-        "icon": "mdi:calendar-month",
-    },
-    "pv_year_kwh": {
-        "name": "PV Year Energy",
-        "unit": "kWh",
-        "device_class": "energy",
-        "icon": "mdi:calendar-range",
-    },
-    "pv_total_kwh": {
-        "name": "PV Total Energy",
-        "unit": "kWh",
-        "device_class": "energy",
-        "state_class": "total_increasing",
-        "icon": "mdi:counter",
-    },
-    "bms_remaining_ah": {
-        "name": "BMS Remaining Capacity",
-        "unit": "Ah",
-        "icon": "mdi:battery-medium",
-    },
-    "bms_nominal_ah": {
-        "name": "BMS Nominal Capacity",
-        "unit": "Ah",
-        "icon": "mdi:battery-outline",
-    },
-    "bms_cell_count": {
-        "name": "BMS Cell Count",
-        "state_class": "measurement",
-        "icon": "mdi:battery-sync",
-    },
-    "bms_min_cell_mv": {
-        "name": "BMS Min Cell Voltage",
-        "unit": "mV",
-        "state_class": "measurement",
-        "icon": "mdi:battery-low",
-    },
-    "bms_max_cell_mv": {
-        "name": "BMS Max Cell Voltage",
-        "unit": "mV",
-        "state_class": "measurement",
-        "icon": "mdi:battery-high",
-    },
-    "bms_min_cell_pos": {
-        "name": "BMS Min Cell Position",
-        "state_class": "measurement",
-        "icon": "mdi:numeric",
-    },
-    "bms_max_cell_pos": {
-        "name": "BMS Max Cell Position",
-        "state_class": "measurement",
-        "icon": "mdi:numeric",
-    },
-    "bms_cell_delta_mv": {
-        "name": "BMS Cell Delta",
-        "unit": "mV",
-        "state_class": "measurement",
-        "icon": "mdi:battery-sync",
-    },
+    "grid_v": {"name": "Grid Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:transmission-tower"},
+    "grid_hz": {"name": "Grid Frequency", "unit": "Hz", "device_class": "frequency", "state_class": "measurement", "icon": "mdi:current-ac"},
+    "mains_apparent_va": {"name": "Mains Apparent Power", "unit": "VA", "device_class": "apparent_power", "state_class": "measurement", "icon": "mdi:flash"},
+    "mains_power_w": {"name": "Mains Power", "unit": "W", "device_class": "power", "state_class": "measurement", "icon": "mdi:transmission-tower-export"},
+
+    "out_v": {"name": "Output Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:power-plug"},
+    "out_hz": {"name": "Output Frequency", "unit": "Hz", "device_class": "frequency", "state_class": "measurement", "icon": "mdi:current-ac"},
+    "apparent_va": {"name": "Output Apparent Power", "unit": "VA", "device_class": "apparent_power", "state_class": "measurement", "icon": "mdi:flash"},
+    "load_w": {"name": "Output Active Power", "unit": "W", "device_class": "power", "state_class": "measurement", "icon": "mdi:home-lightning-bolt"},
+
+    "bat_v": {"name": "Battery Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery"},
+    "bat_cap": {"name": "Battery Capacity", "unit": "%", "device_class": "battery", "state_class": "measurement", "icon": "mdi:battery-high"},
+    "bat_series_count": {"name": "Battery Number In Series", "state_class": "measurement", "icon": "mdi:numeric"},
+    "bat_charge_current": {"name": "Battery Charging Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:battery-plus"},
+    "dischg_current": {"name": "Battery Discharge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:battery-minus"},
+    "bat_temp": {"name": "Inverter Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer"},
+
+    "pv_v": {"name": "PV Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:solar-panel"},
+    "pv_current_a": {"name": "PV Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:current-dc"},
+    "pv_w": {"name": "PV Power", "unit": "W", "device_class": "power", "state_class": "measurement", "icon": "mdi:solar-power"},
+    "pv2_v": {"name": "PV2 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:solar-panel-large"},
+    "pv2_current_a": {"name": "PV2 Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:current-dc"},
+    "pv_temp": {"name": "PV Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer"},
+    "pv2_temp": {"name": "PV2 Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer"},
+
+    "max_chg": {"name": "Max Charge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:current-dc"},
+    "util_chg": {"name": "Utility Charge Current", "unit": "A", "device_class": "current", "state_class": "measurement", "icon": "mdi:current-dc"},
+    "bulk_v": {"name": "Bulk Charging Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-charging-high"},
+    "float_v": {"name": "Float Charging Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-charging-medium"},
+    "cut_v": {"name": "Low Battery Cut-off", "unit": "V", "device_class": "voltage", "state_class": "measurement", "icon": "mdi:battery-off-outline"},
+
+    "pv_today_kwh": {"name": "PV Today Energy", "unit": "kWh", "device_class": "energy", "icon": "mdi:solar-power-variant"},
+    "pv_month_kwh": {"name": "PV Month Energy", "unit": "kWh", "device_class": "energy", "icon": "mdi:calendar-month"},
+    "pv_year_kwh": {"name": "PV Year Energy", "unit": "kWh", "device_class": "energy", "icon": "mdi:calendar-range"},
+    "pv_total_kwh": {"name": "PV Total Energy", "unit": "kWh", "device_class": "energy", "state_class": "total_increasing", "icon": "mdi:counter"},
+
+    "bms_remaining_ah": {"name": "BMS Remaining Capacity", "unit": "Ah", "icon": "mdi:battery-medium"},
+    "bms_nominal_ah": {"name": "BMS Nominal Capacity", "unit": "Ah", "icon": "mdi:battery-outline"},
+    "bms_cell_count": {"name": "BMS Cell Count", "state_class": "measurement", "icon": "mdi:battery-sync"},
+    "bms_min_cell_mv": {"name": "BMS Min Cell Voltage", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-low"},
+    "bms_max_cell_mv": {"name": "BMS Max Cell Voltage", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-high"},
+    "bms_min_cell_pos": {"name": "BMS Min Cell Position", "state_class": "measurement", "icon": "mdi:numeric"},
+    "bms_max_cell_pos": {"name": "BMS Max Cell Position", "state_class": "measurement", "icon": "mdi:numeric"},
+    "bms_cell_delta_mv": {"name": "BMS Cell Delta", "unit": "mV", "state_class": "measurement", "icon": "mdi:battery-sync"},
 }
 
 for i in range(1, 17):
@@ -291,6 +152,12 @@ def mqtt_type_name(first_byte: int) -> str:
     return MQTT_PACKET_TYPES.get((first_byte >> 4) & 0x0F, f"TYPE_{(first_byte >> 4) & 0x0F}")
 
 
+def display_sensor_name(base_name: str) -> str:
+    if ENTITY_PREFIX:
+        return f"{ENTITY_PREFIX} {base_name}"
+    return base_name
+
+
 def create_mqtt_client() -> mqtt.Client:
     try:
         c = mqtt.Client(
@@ -318,14 +185,14 @@ def publish_discovery() -> None:
     device_info = {
         "identifiers": [DEVICE_ID],
         "name": DEVICE_NAME,
-        "manufacturer": "PowMr",
-        "model": "Siseli / RWB1 compatible",
+        "manufacturer": MANUFACTURER,
+        "model": MODEL_NAME,
     }
 
     for key, meta in SENSORS.items():
         topic = f"{MQTT_DISCOVERY_PREFIX}/sensor/{DEVICE_ID}/{key}/config"
         payload = {
-            "name": f"PowMr {meta['name']}",
+            "name": display_sensor_name(str(meta["name"])),
             "unique_id": f"{DEVICE_ID}_{key}",
             "state_topic": STATE_TOPIC,
             "value_template": f"{{{{ value_json.{key} }}}}",
@@ -543,8 +410,6 @@ class SolarParser:
         text = text.replace("\r", " ").replace("\n", " ").replace("\x00", " ").strip()
         if text.startswith("("):
             text = text[1:]
-        text = text.strip()
-
         parts = [p.strip() for p in text.split(" ") if p.strip()]
         cleaned = []
         for p in parts:
@@ -552,7 +417,6 @@ class SolarParser:
                 p = p[:-1]
             if p:
                 cleaned.append(p)
-
         return text, cleaned
 
     @staticmethod
@@ -625,8 +489,8 @@ class SolarParser:
             return state
 
         cell_values = cell_values[:16]
-
         state["bms_cell_count"] = len(cell_values)
+
         for idx, mv in enumerate(cell_values, start=1):
             state[f"cell_{idx}_mv"] = mv
 
@@ -640,48 +504,6 @@ class SolarParser:
         state["bms_min_cell_pos"] = min_pos
         state["bms_max_cell_pos"] = max_pos
         state["bms_cell_delta_mv"] = max_mv - min_mv
-
-        return state
-
-    @staticmethod
-    def _try_old_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
-        lower_blocks = {k.lower(): v for k, v in blocks.items()}
-        ps4z = lower_blocks.get("ps4z")
-        sgx0 = lower_blocks.get("sgx0") or lower_blocks.get("sgxo")
-
-        state: Dict[str, object] = {}
-
-        if ps4z and len(ps4z) >= 44:
-            state["grid_v"] = round(int.from_bytes(ps4z[5:7], "little") / 10.0, 1)
-            state["grid_hz"] = round(int.from_bytes(ps4z[7:9], "little") / 10.0, 1)
-            state["bat_v"] = round(int.from_bytes(ps4z[13:15], "little") / 10.0, 1)
-            state["bat_cap"] = int.from_bytes(ps4z[15:17], "little")
-            state["out_v"] = round(int.from_bytes(ps4z[21:23], "little") / 10.0, 1)
-            state["out_hz"] = round(int.from_bytes(ps4z[23:25], "little") / 10.0, 1)
-            state["apparent_va"] = int.from_bytes(ps4z[25:27], "little")
-            state["load_w"] = int.from_bytes(ps4z[27:29], "little")
-            state["pv_v"] = round(int.from_bytes(ps4z[39:41], "little") / 10.0, 1)
-
-            pv_w = int.from_bytes(ps4z[41:43], "little")
-            state["pv_w"] = pv_w if pv_w < 6500 else 0
-
-            bat_v = float(state.get("bat_v") or 0)
-            load_w = float(state.get("load_w") or 0)
-            grid_v = float(state.get("grid_v") or 0)
-
-            if bat_v > 0 and grid_v < 100 and load_w > 0:
-                state["dischg_current"] = round(load_w / bat_v, 1)
-            else:
-                state["dischg_current"] = 0
-
-        if sgx0 and len(sgx0) >= 42:
-            state["max_chg"] = int.from_bytes(sgx0[13:15], "little")
-            state["util_chg"] = int.from_bytes(sgx0[17:19], "little")
-            state["float_v"] = round(int.from_bytes(sgx0[21:23], "little") / 10.0, 1)
-            state["bulk_v"] = round(int.from_bytes(sgx0[23:25], "little") / 10.0, 1)
-            state["cut_v"] = round(int.from_bytes(sgx0[27:29], "little") / 10.0, 1)
-            state["bat_temp"] = int(sgx0[41])
-
         return state
 
     @staticmethod
@@ -689,16 +511,8 @@ class SolarParser:
         state: Dict[str, object] = {}
         parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
 
+        # Output block
         vals = parsed.get("2l0E", ("", []))[1]
-        if len(vals) >= 2:
-            v = SolarParser._to_float(vals[0])
-            hz = SolarParser._to_float(vals[1])
-            if v is not None:
-                state["grid_v"] = round(v, 1)
-            if hz is not None:
-                state["grid_hz"] = round(hz, 1)
-
-        vals = parsed.get("WdRR", ("", []))[1]
         if len(vals) >= 4:
             out_v = SolarParser._to_float(vals[0])
             out_hz = SolarParser._to_float(vals[1])
@@ -714,24 +528,83 @@ class SolarParser:
             if load_w is not None:
                 state["load_w"] = load_w
 
+        # Grid / mains block
+        vals = parsed.get("WdRR", ("", []))[1]
+        if len(vals) >= 4:
+            grid_v = SolarParser._to_float(vals[0])
+            grid_hz = SolarParser._to_float(vals[1])
+            mains_va = SolarParser._to_int(vals[2])
+            mains_w = SolarParser._to_int(vals[3])
+
+            if grid_v is not None:
+                state["grid_v"] = round(grid_v, 1)
+            if grid_hz is not None:
+                state["grid_hz"] = round(grid_hz, 1)
+            if mains_va is not None:
+                state["mains_apparent_va"] = mains_va
+            if mains_w is not None:
+                state["mains_power_w"] = mains_w
+
+        # Battery block
         vals = parsed.get("2ONL", ("", []))[1]
-        if len(vals) >= 3:
+        if len(vals) >= 5:
+            series_count = SolarParser._to_int(vals[0])
             bat_v = SolarParser._to_float(vals[1])
             bat_cap = SolarParser._to_int(vals[2])
+            chg_a = SolarParser._to_float(vals[3])
+            dischg_a = SolarParser._to_float(vals[4])
+
+            if series_count is not None:
+                state["bat_series_count"] = series_count
             if bat_v is not None:
                 state["bat_v"] = round(bat_v, 1)
             if bat_cap is not None:
                 state["bat_cap"] = bat_cap
+            if chg_a is not None:
+                state["bat_charge_current"] = round(chg_a, 1)
+            if dischg_a is not None:
+                state["dischg_current"] = round(dischg_a, 1)
 
+        # PV1 block
         vals = parsed.get("Mpod", ("", []))[1]
         if len(vals) >= 3:
             pv_v = SolarParser._to_float(vals[0])
+            pv_a = SolarParser._to_float(vals[1])
             pv_w = SolarParser._to_int(vals[2])
+
             if pv_v is not None:
                 state["pv_v"] = round(pv_v, 1)
+            if pv_a is not None:
+                state["pv_current_a"] = round(pv_a, 1)
             if pv_w is not None:
                 state["pv_w"] = pv_w
 
+        # PV2 likely block
+        vals = parsed.get("noeP", ("", []))[1]
+        if len(vals) >= 5:
+            pv2_a = SolarParser._to_float(vals[3])
+            pv2_v = SolarParser._to_float(vals[4])
+
+            if pv2_a is not None:
+                state["pv2_current_a"] = round(pv2_a, 1)
+            if pv2_v is not None:
+                state["pv2_v"] = round(pv2_v, 1)
+
+        # Temps block
+        vals = parsed.get("V4W3", ("", []))[1]
+        if len(vals) >= 6:
+            pv_temp = SolarParser._to_float(vals[0])
+            inv_temp = SolarParser._to_float(vals[1])
+            pv2_temp = SolarParser._to_float(vals[5])
+
+            if pv_temp is not None:
+                state["pv_temp"] = round(pv_temp, 1)
+            if inv_temp is not None:
+                state["bat_temp"] = round(inv_temp, 1)
+            if pv2_temp is not None:
+                state["pv2_temp"] = round(pv2_temp, 1)
+
+        # Charge settings block
         vals = parsed.get("dHrK", ("", []))[1]
         if len(vals) >= 5:
             cut_v = SolarParser._to_float(vals[1])
@@ -748,25 +621,20 @@ class SolarParser:
             if bulk_v is not None:
                 state["bulk_v"] = round(bulk_v, 1)
 
+        # Energy counters
         vals = parsed.get("COST", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_cost_energy(vals))
 
+        # BMS capacities
         vals = parsed.get("uxJp", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_bms_capacity(vals))
 
+        # Cell list
         vals = parsed.get("v09K", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_cell_list(vals))
-
-        bat_v = float(state.get("bat_v") or 0)
-        load_w = float(state.get("load_w") or 0)
-        grid_v = float(state.get("grid_v") or 0)
-        if bat_v > 0 and grid_v < 100 and load_w > 0:
-            state["dischg_current"] = round(load_w / bat_v, 1)
-        elif "bat_v" in state:
-            state["dischg_current"] = 0
 
         return state
 
@@ -792,16 +660,14 @@ class SolarParser:
                 raw = raw[:end + 1]
 
             raw_json = json.loads(raw)
-
             candidate_pairs = SolarParser._walk_for_blocks(raw_json)
+
             blocks: Dict[str, bytes] = {}
             seen = set()
-
             for name, encoded in candidate_pairs:
                 key = name.strip()
                 if not key:
                     continue
-
                 dedupe_key = (key, encoded[:32])
                 if dedupe_key in seen:
                     continue
@@ -810,13 +676,9 @@ class SolarParser:
                 decoded = SolarParser._safe_b64decode(encoded)
                 if decoded is None:
                     continue
-
                 blocks[key] = decoded
 
-            state = SolarParser._try_old_schema(blocks)
-            if not state:
-                state = SolarParser._try_ascii_schema(blocks)
-
+            state = SolarParser._try_ascii_schema(blocks)
             if state:
                 LAST_STATE.update(state)
                 if DISCOVERY_PUBLISHED:
@@ -882,13 +744,11 @@ def packet_callback(pkt) -> None:
 
     if src_ip == INVERTER_IP and not INV_MAC:
         INV_MAC = src_mac
-
     if dst_ip == INVERTER_IP and not RTR_MAC:
         RTR_MAC = src_mac
 
     if src_ip == INVERTER_IP and src_mac:
         KNOWN_INVERTER_MACS.add(src_mac)
-
     if dst_ip == INVERTER_IP and src_mac:
         KNOWN_ROUTER_MACS.add(src_mac)
 
@@ -935,7 +795,6 @@ def packet_callback(pkt) -> None:
                     send_layer2(fwd_pkt, SNIFF_IFACE)
                 except Exception as exc:
                     log(f"[FWD ERROR] inverter->router {exc}")
-
         return
 
     if dst_ip == INVERTER_IP:
@@ -991,10 +850,11 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- PowMr Bridge 2.1.3 ---")
+    log("--- Inverter Bridge 2.2.0 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
+    log(f"[Config] DEVICE_NAME={DEVICE_NAME} MANUFACTURER={MANUFACTURER}")
     log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
 
     start_mqtt()
