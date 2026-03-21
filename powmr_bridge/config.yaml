@@ -1,6 +1,6 @@
-name: "PowMr Inverter Bridge"
-description: "Local bridge for PowMr/Siseli inverters with MQTT discovery for Home Assistant."
-version: "2.2.3"
+name: "Taico Inverter Bridge"
+description: "Local bridge for Taico / Siseli-compatible inverters with MQTT discovery for Home Assistant."
+version: "2.2.4"
 slug: "powmr_bridge"
 init: false
 arch:
@@ -33,10 +33,14 @@ options:
   AUTO_INTERCEPT: true
 
   MQTT_DISCOVERY_PREFIX: "homeassistant"
-  DEVICE_ID: "powmr_rwb1"
-  DEVICE_NAME: "PowMr 6.2kW Inverter"
-  STATE_TOPIC: "powmr/powmr_rwb1/state"
-  AVAILABILITY_TOPIC: "powmr/powmr_rwb1/availability"
+  DEVICE_ID: "taico_inverter_1"
+  DEVICE_NAME: "Taico inverter 1"
+  MODEL_NAME: "Taico inverter 1"
+  MANUFACTURER: "Taico"
+  ENTITY_PREFIX: "Taico"
+
+  STATE_TOPIC: "powmr/taico_inverter_1/state"
+  AVAILABILITY_TOPIC: "powmr/taico_inverter_1/availability"
   SNIFF_IFACE: ""
   LOG_VERBOSE: true
 
@@ -59,6 +63,10 @@ schema:
   MQTT_DISCOVERY_PREFIX: str
   DEVICE_ID: str
   DEVICE_NAME: str
+  MODEL_NAME: str
+  MANUFACTURER: str
+  ENTITY_PREFIX: str?
+
   STATE_TOPIC: str
   AVAILABILITY_TOPIC: str
   SNIFF_IFACE: str?
