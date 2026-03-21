@@ -59,71 +59,68 @@ KNOWN_ROUTER_MACS = set()
 LAST_PACKET_TS = 0.0
 
 
-def sensor(group: str, name: str, **kwargs) -> Dict[str, object]:
-    data: Dict[str, object] = {"group": group, "name": name}
+def sensor(name: str, **kwargs) -> Dict[str, object]:
+    data: Dict[str, object] = {"name": name}
     data.update(kwargs)
     return data
 
 
 SENSORS: Dict[str, Dict[str, object]] = {
-    # Main / info
-    "model_code": sensor("info", "Model Code", icon="mdi:identifier"),
-    "firmware_info": sensor("info", "Firmware Info", icon="mdi:chip"),
+    # Info
+    "model_code": sensor("Model Code", icon="mdi:identifier"),
+    "firmware_info": sensor("Firmware Info", icon="mdi:chip"),
 
     # Grid
-    "grid_v": sensor("grid", "Grid Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:transmission-tower"),
-    "grid_hz": sensor("grid", "Grid Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
-    "mains_apparent_va": sensor("grid", "Mains Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
-    "mains_power_w": sensor("grid", "Mains Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-export"),
+    "grid_v": sensor("Grid Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:transmission-tower"),
+    "grid_hz": sensor("Grid Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
+    "mains_apparent_va": sensor("Mains Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
+    "mains_power_w": sensor("Mains Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-export"),
 
     # Load / output
-    "out_v": sensor("load", "Output Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:power-plug"),
-    "out_hz": sensor("load", "Output Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
-    "apparent_va": sensor("load", "Output Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
-    "load_w": sensor("load", "Output Active Power", unit="W", device_class="power", state_class="measurement", icon="mdi:home-lightning-bolt"),
-    "output_dc_comp": sensor("load", "Output DC Compensator", state_class="measurement", icon="mdi:tune-variant"),
+    "out_v": sensor("Output Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:power-plug"),
+    "out_hz": sensor("Output Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
+    "apparent_va": sensor("Output Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
+    "load_w": sensor("Output Active Power", unit="W", device_class="power", state_class="measurement", icon="mdi:home-lightning-bolt"),
 
     # Battery
-    "bat_v": sensor("battery", "Battery Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery"),
-    "bat_cap": sensor("battery", "Battery Capacity", unit="%", device_class="battery", state_class="measurement", icon="mdi:battery-high"),
-    "bat_series_count": sensor("battery", "Battery Number In Series", state_class="measurement", icon="mdi:numeric"),
-    "bat_charge_current": sensor("battery", "Battery Charging Current", unit="A", device_class="current", state_class="measurement", icon="mdi:battery-plus"),
-    "dischg_current": sensor("battery", "Battery Discharge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:battery-minus"),
-    "bat_temp": sensor("battery", "Inverter Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
-    "max_chg": sensor("battery", "Max Charge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
-    "util_chg": sensor("battery", "Utility Charge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
-    "bulk_v": sensor("battery", "Bulk Charging Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-high"),
-    "float_v": sensor("battery", "Float Charging Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-medium"),
-    "cut_v": sensor("battery", "Low Battery Cut-off", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-off-outline"),
+    "bat_v": sensor("Battery Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery"),
+    "bat_cap": sensor("Battery Capacity", unit="%", device_class="battery", state_class="measurement", icon="mdi:battery-high"),
+    "bat_series_count": sensor("Battery Number In Series", state_class="measurement", icon="mdi:numeric"),
+    "bat_charge_current": sensor("Battery Charging Current", unit="A", device_class="current", state_class="measurement", icon="mdi:battery-plus"),
+    "dischg_current": sensor("Battery Discharge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:battery-minus"),
+    "bat_temp": sensor("Inverter Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
+    "max_chg": sensor("Max Charge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
+    "bulk_v": sensor("Bulk Charging Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-high"),
+    "float_v": sensor("Float Charging Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-medium"),
+    "cut_v": sensor("Low Battery Cut-off", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-off-outline"),
 
     # PV
-    "pv_v": sensor("pv", "PV Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:solar-panel"),
-    "pv_current_a": sensor("pv", "PV Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
-    "pv_w": sensor("pv", "PV Power", unit="W", device_class="power", state_class="measurement", icon="mdi:solar-power"),
-    "pv2_v": sensor("pv", "PV2 Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:solar-panel-large"),
-    "pv2_current_a": sensor("pv", "PV2 Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
-    "pv2_power_w": sensor("pv", "PV2 Power", unit="W", device_class="power", state_class="measurement", icon="mdi:solar-power-variant"),
-    "pv_temp": sensor("pv", "PV Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
-    "pv2_temp": sensor("pv", "PV2 Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
-    "pv_today_kwh": sensor("pv", "PV Today Energy", unit="kWh", device_class="energy", icon="mdi:solar-power-variant"),
-    "pv_month_kwh": sensor("pv", "PV Month Energy", unit="kWh", device_class="energy", icon="mdi:calendar-month"),
-    "pv_year_kwh": sensor("pv", "PV Year Energy", unit="kWh", device_class="energy", icon="mdi:calendar-range"),
-    "pv_total_kwh": sensor("pv", "PV Total Energy", unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:counter"),
+    "pv_v": sensor("PV Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:solar-panel"),
+    "pv_current_a": sensor("PV Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
+    "pv_w": sensor("PV Power", unit="W", device_class="power", state_class="measurement", icon="mdi:solar-power"),
+    "pv2_v": sensor("PV2 Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:solar-panel-large"),
+    "pv2_current_a": sensor("PV2 Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
+    "pv2_power_w": sensor("PV2 Power", unit="W", device_class="power", state_class="measurement", icon="mdi:solar-power-variant"),
+    "pv_temp": sensor("PV Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
+    "pv2_temp": sensor("PV2 Temperature", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
+    "pv_today_kwh": sensor("PV Today Energy", unit="kWh", device_class="energy", icon="mdi:solar-power-variant"),
+    "pv_month_kwh": sensor("PV Month Energy", unit="kWh", device_class="energy", icon="mdi:calendar-month"),
+    "pv_year_kwh": sensor("PV Year Energy", unit="kWh", device_class="energy", icon="mdi:calendar-range"),
+    "pv_total_kwh": sensor("PV Total Energy", unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:counter"),
 
     # BMS
-    "bms_remaining_ah": sensor("bms", "BMS Remaining Capacity", unit="Ah", icon="mdi:battery-medium"),
-    "bms_nominal_ah": sensor("bms", "BMS Nominal Capacity", unit="Ah", icon="mdi:battery-outline"),
-    "bms_cell_count": sensor("bms", "BMS Cell Count", state_class="measurement", icon="mdi:battery-sync"),
-    "bms_min_cell_mv": sensor("bms", "BMS Min Cell Voltage", unit="mV", state_class="measurement", icon="mdi:battery-low"),
-    "bms_max_cell_mv": sensor("bms", "BMS Max Cell Voltage", unit="mV", state_class="measurement", icon="mdi:battery-high"),
-    "bms_min_cell_pos": sensor("bms", "BMS Min Cell Position", state_class="measurement", icon="mdi:numeric"),
-    "bms_max_cell_pos": sensor("bms", "BMS Max Cell Position", state_class="measurement", icon="mdi:numeric"),
-    "bms_cell_delta_mv": sensor("bms", "BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
+    "bms_remaining_ah": sensor("BMS Remaining Capacity", unit="Ah", icon="mdi:battery-medium"),
+    "bms_nominal_ah": sensor("BMS Nominal Capacity", unit="Ah", icon="mdi:battery-outline"),
+    "bms_cell_count": sensor("BMS Cell Count", state_class="measurement", icon="mdi:battery-sync"),
+    "bms_min_cell_mv": sensor("BMS Min Cell Voltage", unit="mV", state_class="measurement", icon="mdi:battery-low"),
+    "bms_max_cell_mv": sensor("BMS Max Cell Voltage", unit="mV", state_class="measurement", icon="mdi:battery-high"),
+    "bms_min_cell_pos": sensor("BMS Min Cell Position", state_class="measurement", icon="mdi:numeric"),
+    "bms_max_cell_pos": sensor("BMS Max Cell Position", state_class="measurement", icon="mdi:numeric"),
+    "bms_cell_delta_mv": sensor("BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
 }
 
 for i in range(1, 17):
     SENSORS[f"cell_{i}_mv"] = sensor(
-        "bms",
         f"Cell {i} Voltage",
         unit="mV",
         state_class="measurement",
@@ -173,33 +170,12 @@ def display_sensor_name(base_name: str) -> str:
     return f"{ENTITY_PREFIX} {base_name}".strip() if ENTITY_PREFIX else base_name
 
 
-def main_device_info() -> Dict[str, object]:
+def device_info() -> Dict[str, object]:
     return {
         "identifiers": [DEVICE_ID],
         "name": DEVICE_NAME,
         "manufacturer": MANUFACTURER,
         "model": MODEL_NAME,
-    }
-
-
-def group_device_info(group: str) -> Dict[str, object]:
-    if group == "info":
-        return main_device_info()
-
-    title = {
-        "grid": "Grid",
-        "load": "Load",
-        "battery": "Battery",
-        "pv": "PV",
-        "bms": "BMS",
-    }.get(group, group.title())
-
-    return {
-        "identifiers": [f"{DEVICE_ID}_{group}"],
-        "name": f"{DEVICE_NAME} {title}",
-        "manufacturer": MANUFACTURER,
-        "model": f"{MODEL_NAME} {title}",
-        "via_device": DEVICE_ID,
     }
 
 
@@ -237,7 +213,7 @@ def publish_discovery() -> None:
             "availability_topic": AVAILABILITY_TOPIC,
             "payload_available": "online",
             "payload_not_available": "offline",
-            "device": group_device_info(str(meta["group"])),
+            "device": device_info(),
             "icon": meta.get("icon"),
         }
 
@@ -448,6 +424,7 @@ class SolarParser:
         text = text.replace("\r", " ").replace("\n", " ").replace("\x00", " ").strip()
         if text.startswith("("):
             text = text[1:]
+
         parts = [p.strip() for p in text.split(" ") if p.strip()]
         cleaned = []
         for p in parts:
@@ -455,6 +432,7 @@ class SolarParser:
                 p = p[:-1]
             if p:
                 cleaned.append(p)
+
         return text, cleaned
 
     @staticmethod
@@ -555,47 +533,44 @@ class SolarParser:
         if "hR6Y" in parsed:
             state["firmware_info"] = parsed["hR6Y"][0]
 
-        # Output / load
+        # Output / load block
         vals = parsed.get("2l0E", ("", []))[1]
         if len(vals) >= 4:
             out_v = SolarParser._to_float(vals[0])
             out_hz = SolarParser._to_float(vals[1])
-            apparent = SolarParser._to_int(vals[2])
-            load_w = SolarParser._to_int(vals[3])
+            out_va = SolarParser._to_int(vals[2])
+            out_w = SolarParser._to_int(vals[3])
 
             if out_v is not None:
                 state["out_v"] = round(out_v, 1)
             if out_hz is not None:
                 state["out_hz"] = round(out_hz, 1)
-            if apparent is not None:
-                state["apparent_va"] = apparent
-            if load_w is not None:
-                state["load_w"] = load_w
+            if out_va is not None:
+                state["apparent_va"] = out_va
+            if out_w is not None:
+                state["load_w"] = out_w
 
-        # Grid / mains
+        # Grid / mains block
         vals = parsed.get("WdRR", ("", []))[1]
-        if len(vals) >= 4:
+        if len(vals) >= 2:
             grid_v = SolarParser._to_float(vals[0])
             grid_hz = SolarParser._to_float(vals[1])
-            mains_va = SolarParser._to_int(vals[2])
-            mains_w = SolarParser._to_int(vals[3])
 
             if grid_v is not None:
                 state["grid_v"] = round(grid_v, 1)
             if grid_hz is not None:
                 state["grid_hz"] = round(grid_hz, 1)
+
+        if len(vals) >= 4:
+            mains_va = SolarParser._to_int(vals[2])
+            mains_w = SolarParser._to_int(vals[3])
+
             if mains_va is not None:
                 state["mains_apparent_va"] = mains_va
             if mains_w is not None:
                 state["mains_power_w"] = mains_w
 
-            # best match so far for app's "Output DC Compensator"
-            if len(vals) >= 5:
-                dc_comp = SolarParser._to_int(vals[4])
-                if dc_comp is not None:
-                    state["output_dc_comp"] = dc_comp
-
-        # Battery
+        # Battery block
         vals = parsed.get("2ONL", ("", []))[1]
         if len(vals) >= 3:
             series_count = SolarParser._to_int(vals[0])
@@ -609,17 +584,17 @@ class SolarParser:
             if bat_cap is not None:
                 state["bat_cap"] = bat_cap
 
-            if len(vals) >= 4:
-                charge_a = SolarParser._to_float(vals[3])
-                if charge_a is not None:
-                    state["bat_charge_current"] = round(charge_a, 1)
+        if len(vals) >= 4:
+            charge_a = SolarParser._to_float(vals[3])
+            if charge_a is not None:
+                state["bat_charge_current"] = round(charge_a, 1)
 
-            if len(vals) >= 5:
-                dischg_a = SolarParser._to_float(vals[4])
-                if dischg_a is not None:
-                    state["dischg_current"] = round(dischg_a, 1)
+        if len(vals) >= 5:
+            dischg_a = SolarParser._to_float(vals[4])
+            if dischg_a is not None:
+                state["dischg_current"] = round(dischg_a, 1)
 
-        # PV1
+        # PV1 block
         vals = parsed.get("Mpod", ("", []))[1]
         if len(vals) >= 3:
             pv_v = SolarParser._to_float(vals[0])
@@ -633,21 +608,23 @@ class SolarParser:
             if pv_w is not None:
                 state["pv_w"] = pv_w
 
-        # PV2
+        # PV2 block
         vals = parsed.get("noeP", ("", []))[1]
         if len(vals) >= 5:
-            pv2_current = SolarParser._to_float(vals[1])
-            pv2_power = SolarParser._to_int(vals[2])
+            # best current match from your app screenshots
+            pv2_current = SolarParser._to_float(vals[3])
             pv2_voltage = SolarParser._to_float(vals[4])
 
             if pv2_current is not None:
                 state["pv2_current_a"] = round(pv2_current, 1)
-            if pv2_power is not None:
-                state["pv2_power_w"] = pv2_power
             if pv2_voltage is not None:
                 state["pv2_v"] = round(pv2_voltage, 1)
 
-        # Temperatures
+            pv2_power = SolarParser._to_int(vals[2])
+            if pv2_power is not None:
+                state["pv2_power_w"] = pv2_power
+
+        # Temperature block
         vals = parsed.get("V4W3", ("", []))[1]
         if len(vals) >= 6:
             pv_temp = SolarParser._to_float(vals[0])
@@ -661,7 +638,7 @@ class SolarParser:
             if pv2_temp is not None:
                 state["pv2_temp"] = round(pv2_temp, 1)
 
-        # Charge settings
+        # Charge settings block
         vals = parsed.get("dHrK", ("", []))[1]
         if len(vals) >= 5:
             cut_v = SolarParser._to_float(vals[1])
@@ -725,6 +702,7 @@ class SolarParser:
                 key = name.strip()
                 if not key:
                     continue
+
                 dedupe_key = (key, encoded[:32])
                 if dedupe_key in seen:
                     continue
@@ -907,7 +885,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.2.5 ---")
+    log("--- Inverter Bridge 2.2.6 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
