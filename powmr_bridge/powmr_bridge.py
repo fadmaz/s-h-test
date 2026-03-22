@@ -61,15 +61,6 @@ LAST_PACKET_TS = 0.0
 
 STRICT_NUM_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 
-DEBUG_BLOCK_SENSOR_MAP = {
-    "2l0E": "dbg_2l0e_raw",
-    "WdRR": "dbg_wdrr_raw",
-    "93VQ": "dbg_93vq_raw",
-    "2ONL": "dbg_2onl_raw",
-    "Mpod": "dbg_mpod_raw",
-    "noeP": "dbg_noep_raw",
-}
-
 
 def sensor(name: str, **kwargs) -> Dict[str, object]:
     data: Dict[str, object] = {"name": name}
@@ -135,14 +126,6 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bms_min_cell_pos": sensor("BMS Min Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_max_cell_pos": sensor("BMS Max Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_cell_delta_mv": sensor("BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
-
-    # Debug raw blocks
-    "dbg_2l0e_raw": sensor("DEBUG 2l0E Raw", icon="mdi:bug-outline"),
-    "dbg_wdrr_raw": sensor("DEBUG WdRR Raw", icon="mdi:bug-outline"),
-    "dbg_93vq_raw": sensor("DEBUG 93VQ Raw", icon="mdi:bug-outline"),
-    "dbg_2onl_raw": sensor("DEBUG 2ONL Raw", icon="mdi:bug-outline"),
-    "dbg_mpod_raw": sensor("DEBUG Mpod Raw", icon="mdi:bug-outline"),
-    "dbg_noep_raw": sensor("DEBUG noeP Raw", icon="mdi:bug-outline"),
 }
 
 for i in range(1, 17):
@@ -267,7 +250,6 @@ def on_connect(_client, _userdata, _flags, rc, _properties=None):
             LAST_STATE.update({
                 "mains_apparent_va": None,
                 "mains_power_w": None,
-                "load_pct": None,
             })
 
         client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
@@ -588,35 +570,13 @@ class SolarParser:
         return state
 
     @staticmethod
-    def _log_debug_blocks(parsed: Dict[str, Tuple[str, List[str]]]) -> None:
-        for block_name in DEBUG_BLOCK_SENSOR_MAP:
-            if block_name in parsed:
-                raw_text, tokens = parsed[block_name]
-                indexed = " | ".join(f"{idx}={tok}" for idx, tok in enumerate(tokens))
-                log(f"[DEBUG BLOCK] {block_name} raw='{raw_text}'")
-                log(f"[DEBUG TOKENS] {block_name} {indexed}")
-
-    @staticmethod
-    def _publish_debug_blocks(state: Dict[str, object], parsed: Dict[str, Tuple[str, List[str]]]) -> None:
-        for block_name, sensor_key in DEBUG_BLOCK_SENSOR_MAP.items():
-            if block_name in parsed:
-                raw_text, _tokens = parsed[block_name]
-                state[sensor_key] = raw_text[:250]
-            else:
-                state[sensor_key] = None
-
-    @staticmethod
     def _try_ascii_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
         state: Dict[str, object] = {}
-
         parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
-        SolarParser._publish_debug_blocks(state, parsed)
-        SolarParser._log_debug_blocks(parsed)
 
-        # Keep unresolved fields intentionally unknown
+        # Keep unresolved mains fields intentionally unknown
         state["mains_apparent_va"] = None
         state["mains_power_w"] = None
-        state["load_pct"] = None
 
         # Info
         if "SUCV" in parsed:
@@ -649,6 +609,11 @@ class SolarParser:
                 state["apparent_va"] = out_va
             if out_w is not None:
                 state["load_w"] = out_w
+
+        if len(vals) >= 5:
+            load_pct = SolarParser._to_int(vals[4])
+            if load_pct is not None and 0 <= load_pct <= 100:
+                state["load_pct"] = load_pct
 
         # GRID block -> WdRR
         vals = parsed.get("WdRR", ("", []))[1]
@@ -987,7 +952,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.3.3 debug ---")
+    log("--- Inverter Bridge 2.3.4 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
@@ -998,13 +963,6 @@ if __name__ == "__main__":
     LAST_STATE.update({
         "mains_apparent_va": None,
         "mains_power_w": None,
-        "load_pct": None,
-        "dbg_2l0e_raw": None,
-        "dbg_wdrr_raw": None,
-        "dbg_93vq_raw": None,
-        "dbg_2onl_raw": None,
-        "dbg_mpod_raw": None,
-        "dbg_noep_raw": None,
     })
 
     start_mqtt()
