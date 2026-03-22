@@ -52,21 +52,33 @@ DISCOVERY_PUBLISHED = False
 LAST_STATE: Dict[str, object] = {}
 sniffer: Optional[AsyncSniffer] = None
 
-FLOW_BUFFERS: Dict[Tuple[str, int, str, int], bytearray] = {}
-SEGMENT_CACHE: Dict[Tuple[str, int, str, int], Dict[Tuple[int, int, bytes], float]] = {}
-
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
 LAST_PACKET_TS = 0.0
 
 STRICT_NUM_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+PRINTABLE_ASCII_RE = re.compile(r"^[\x20-\x7E]+$")
 
-FOCUS_DEBUG_BLOCKS = {
-    "Yavb": "dbg_yavb_raw",
-    "eo8w": "dbg_eo8w_raw",
-    "WdRR": "dbg_wdrr_raw",
-    "2l0E": "dbg_2l0e_raw",
-}
+MAX_MQTT_PACKET = 1024 * 64
+STREAM_STALE_SECONDS = 30
+MAX_STREAM_BUFFER = 1024 * 256
+
+
+def log(message: str) -> None:
+    print(message, flush=True)
+
+
+def norm_mac(mac: Optional[str]) -> Optional[str]:
+    if not mac:
+        return None
+    return mac.strip().lower().replace("-", ":")
+
+
+def send_layer2(frame, iface: Optional[str] = None) -> None:
+    if iface:
+        sendp(frame, verbose=False, iface=iface)
+    else:
+        sendp(frame, verbose=False)
 
 
 def sensor(name: str, **kwargs) -> Dict[str, object]:
@@ -89,7 +101,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "mains_apparent_va": sensor("Mains Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
     "mains_power_w": sensor("Mains Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-export"),
 
-    # Load / output
+    # Output / load
     "out_v": sensor("Output Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:power-plug"),
     "out_hz": sensor("Output Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
     "apparent_va": sensor("Output Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
@@ -133,12 +145,6 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bms_min_cell_pos": sensor("BMS Min Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_max_cell_pos": sensor("BMS Max Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_cell_delta_mv": sensor("BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
-
-    # Focus debug
-    "dbg_yavb_raw": sensor("DEBUG Yavb Raw", icon="mdi:bug-outline"),
-    "dbg_eo8w_raw": sensor("DEBUG eo8w Raw", icon="mdi:bug-outline"),
-    "dbg_wdrr_raw": sensor("DEBUG WdRR Raw", icon="mdi:bug-outline"),
-    "dbg_2l0e_raw": sensor("DEBUG 2l0E Raw", icon="mdi:bug-outline"),
 }
 
 for i in range(1, 17):
@@ -167,25 +173,21 @@ MQTT_PACKET_TYPES = {
 }
 
 
-def log(message: str) -> None:
-    print(message, flush=True)
+class TcpFlowState:
+    def __init__(self) -> None:
+        self.next_seq: Optional[int] = None
+        self.pending: Dict[int, bytes] = {}
+        self.stream = bytearray()
+        self.last_seen = time.time()
+
+    def reset(self) -> None:
+        self.next_seq = None
+        self.pending.clear()
+        self.stream.clear()
+        self.last_seen = time.time()
 
 
-def norm_mac(mac: Optional[str]) -> Optional[str]:
-    if not mac:
-        return None
-    return mac.strip().lower().replace("-", ":")
-
-
-def send_layer2(frame, iface: Optional[str] = None) -> None:
-    if iface:
-        sendp(frame, verbose=False, iface=iface)
-    else:
-        sendp(frame, verbose=False)
-
-
-def mqtt_type_name(first_byte: int) -> str:
-    return MQTT_PACKET_TYPES.get((first_byte >> 4) & 0x0F, f"TYPE_{(first_byte >> 4) & 0x0F}")
+FLOW_STATES: Dict[Tuple[str, int, str, int], TcpFlowState] = {}
 
 
 def display_sensor_name(base_name: str) -> str:
@@ -258,17 +260,11 @@ def on_connect(_client, _userdata, _flags, rc, _properties=None):
     if code == 0:
         log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}")
         publish_discovery()
-
         if not LAST_STATE:
             LAST_STATE.update({
                 "mains_apparent_va": None,
                 "mains_power_w": None,
-                "dbg_yavb_raw": None,
-                "dbg_eo8w_raw": None,
-                "dbg_wdrr_raw": None,
-                "dbg_2l0e_raw": None,
             })
-
         client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
     else:
         log(f"[HA MQTT ERROR] Connection failed with rc={code}")
@@ -292,6 +288,10 @@ def start_mqtt() -> None:
         log(f"[HA MQTT ERROR] {exc}")
 
 
+def mqtt_type_name(first_byte: int) -> str:
+    return MQTT_PACKET_TYPES.get((first_byte >> 4) & 0x0F, f"TYPE_{(first_byte >> 4) & 0x0F}")
+
+
 def decode_remaining_length(buf: bytes, start_index: int = 1) -> Tuple[Optional[int], Optional[int]]:
     multiplier = 1
     value = 0
@@ -313,51 +313,98 @@ def decode_remaining_length(buf: bytes, start_index: int = 1) -> Tuple[Optional[
             raise ValueError("Malformed MQTT remaining length")
 
 
-def is_duplicate_segment(flow_key: Tuple[str, int, str, int], seq: int, payload: bytes) -> bool:
-    now = time.time()
-    cache = SEGMENT_CACHE.setdefault(flow_key, {})
-
-    stale_keys = [k for k, ts in cache.items() if now - ts > 15]
-    for k in stale_keys:
-        del cache[k]
-
-    sig = (seq, len(payload), payload[:16])
-    if sig in cache:
-        return True
-
-    cache[sig] = now
-    return False
+def is_reasonable_topic(topic: str) -> bool:
+    if not topic or len(topic) > 256:
+        return False
+    if not PRINTABLE_ASCII_RE.match(topic):
+        return False
+    return "/" in topic
 
 
-def extract_mqtt_packets(flow_key: Tuple[str, int, str, int], chunk: bytes) -> List[bytes]:
-    buf = FLOW_BUFFERS.setdefault(flow_key, bytearray())
-    buf.extend(chunk)
+def validate_publish_packet(packet: bytes) -> bool:
+    if not packet or ((packet[0] >> 4) & 0x0F) != 3:
+        return False
 
-    if len(buf) > 1024 * 1024:
-        del buf[:-512 * 1024]
+    remaining_len, pos = decode_remaining_length(packet, 1)
+    if remaining_len is None or pos is None:
+        return False
 
+    if len(packet) != pos + remaining_len:
+        return False
+
+    if len(packet) < pos + 2:
+        return False
+
+    topic_len = int.from_bytes(packet[pos:pos + 2], "big")
+    pos += 2
+    if topic_len <= 0 or topic_len > 256 or len(packet) < pos + topic_len:
+        return False
+
+    topic = packet[pos:pos + topic_len].decode("utf-8", errors="ignore")
+    if not is_reasonable_topic(topic):
+        return False
+
+    return True
+
+
+def validate_generic_mqtt_packet(packet: bytes) -> bool:
+    if not packet:
+        return False
+
+    packet_type = (packet[0] >> 4) & 0x0F
+    if packet_type < 1 or packet_type > 14:
+        return False
+
+    if packet_type == 3:
+        return validate_publish_packet(packet)
+
+    remaining_len, pos = decode_remaining_length(packet, 1)
+    if remaining_len is None or pos is None:
+        return False
+
+    if len(packet) != pos + remaining_len:
+        return False
+
+    if len(packet) > MAX_MQTT_PACKET:
+        return False
+
+    return True
+
+
+def extract_mqtt_packets_from_stream(stream: bytearray) -> List[bytes]:
     packets: List[bytes] = []
 
-    while True:
-        if len(buf) < 2:
-            break
+    while len(stream) >= 2:
+        first = stream[0]
+        packet_type = (first >> 4) & 0x0F
+
+        if packet_type < 1 or packet_type > 14:
+            del stream[0]
+            continue
 
         try:
-            remaining_len, header_end = decode_remaining_length(buf, 1)
-        except Exception as exc:
-            log(f"[MQTT ERROR] remaining length decode failed: {exc}")
-            buf.clear()
-            break
+            remaining_len, header_end = decode_remaining_length(stream, 1)
+        except Exception:
+            del stream[0]
+            continue
 
         if remaining_len is None or header_end is None:
             break
 
         total_len = header_end + remaining_len
-        if len(buf) < total_len:
+        if total_len <= 0 or total_len > MAX_MQTT_PACKET:
+            del stream[0]
+            continue
+
+        if len(stream) < total_len:
             break
 
-        packet = bytes(buf[:total_len])
-        del buf[:total_len]
+        packet = bytes(stream[:total_len])
+        if not validate_generic_mqtt_packet(packet):
+            del stream[0]
+            continue
+
+        del stream[:total_len]
         packets.append(packet)
 
     return packets
@@ -399,6 +446,59 @@ def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[byte
 
     payload = packet[pos:]
     return topic, payload
+
+
+def get_flow_state(flow_key: Tuple[str, int, str, int]) -> TcpFlowState:
+    state = FLOW_STATES.get(flow_key)
+    now = time.time()
+
+    if state is None:
+        state = TcpFlowState()
+        FLOW_STATES[flow_key] = state
+        return state
+
+    if now - state.last_seen > STREAM_STALE_SECONDS:
+        state.reset()
+
+    state.last_seen = now
+    return state
+
+
+def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: bytes) -> List[bytes]:
+    state = get_flow_state(flow_key)
+    packets: List[bytes] = []
+
+    if not payload:
+        return packets
+
+    if state.next_seq is None:
+        state.next_seq = seq
+
+    if seq < state.next_seq:
+        overlap = state.next_seq - seq
+        if overlap >= len(payload):
+            return packets
+        payload = payload[overlap:]
+        seq = state.next_seq
+
+    if seq > state.next_seq:
+        if seq not in state.pending:
+            state.pending[seq] = payload
+        return packets
+
+    state.stream.extend(payload)
+    state.next_seq = seq + len(payload)
+
+    while state.next_seq in state.pending:
+        pending_payload = state.pending.pop(state.next_seq)
+        state.stream.extend(pending_payload)
+        state.next_seq += len(pending_payload)
+
+    if len(state.stream) > MAX_STREAM_BUFFER:
+        del state.stream[:-MAX_STREAM_BUFFER]
+
+    packets.extend(extract_mqtt_packets_from_stream(state.stream))
+    return packets
 
 
 class SolarParser:
@@ -587,28 +687,9 @@ class SolarParser:
         return state
 
     @staticmethod
-    def _update_focus_debug_state(state: Dict[str, object], parsed: Dict[str, Tuple[str, List[str]]]) -> None:
-        for block_name, sensor_key in FOCUS_DEBUG_BLOCKS.items():
-            if block_name in parsed:
-                raw_text, _tokens = parsed[block_name]
-                state[sensor_key] = raw_text[:250]
-
-    @staticmethod
-    def _log_focus_debug(parsed: Dict[str, Tuple[str, List[str]]]) -> None:
-        for block_name in FOCUS_DEBUG_BLOCKS:
-            if block_name in parsed:
-                raw_text, tokens = parsed[block_name]
-                indexed = " | ".join(f"{idx}={tok}" for idx, tok in enumerate(tokens))
-                log(f"[MAINS DEBUG] {block_name} raw='{raw_text}'")
-                log(f"[MAINS TOKENS] {block_name} {indexed}")
-
-    @staticmethod
     def _try_ascii_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
         state: Dict[str, object] = {}
         parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
-
-        SolarParser._update_focus_debug_state(state, parsed)
-        SolarParser._log_focus_debug(parsed)
 
         # Keep unresolved mains fields intentionally unknown
         state["mains_apparent_va"] = None
@@ -685,7 +766,7 @@ class SolarParser:
             if dischg_a is not None and 0 <= dischg_a <= 300:
                 state["dischg_current"] = round(dischg_a, 2)
 
-        # PV1 block
+        # PV1 block -> Mpod
         vals = parsed.get("Mpod", ("", []))[1]
         if len(vals) >= 3:
             pv_v = SolarParser._to_float(vals[0])
@@ -699,7 +780,7 @@ class SolarParser:
             if pv_w is not None:
                 state["pv_w"] = pv_w
 
-        # PV2 block
+        # PV2 block -> noeP
         vals = parsed.get("noeP", ("", []))[1]
         if len(vals) >= 5:
             pv2_current = SolarParser._to_float(vals[1])
@@ -713,7 +794,7 @@ class SolarParser:
             if pv2_voltage is not None:
                 state["pv2_v"] = round(pv2_voltage, 1)
 
-        # Temperature block
+        # Temperature block -> V4W3
         vals = parsed.get("V4W3", ("", []))[1]
         if len(vals) >= 6:
             pv_temp = SolarParser._to_float(vals[0])
@@ -727,7 +808,7 @@ class SolarParser:
             if pv2_temp is not None:
                 state["pv2_temp"] = round(pv2_temp, 1)
 
-        # Charge settings block
+        # Charge settings block -> dHrK
         vals = parsed.get("dHrK", ("", []))[1]
         if len(vals) >= 5:
             cut_v = SolarParser._to_float(vals[1])
@@ -744,7 +825,7 @@ class SolarParser:
             if bulk_v is not None:
                 state["bulk_v"] = round(bulk_v, 1)
 
-        # Additional status / settings block
+        # Additional settings/status block -> 93VQ
         vals = parsed.get("93VQ", ("", []))[1]
         if len(vals) >= 11:
             util_chg = SolarParser._to_int(vals[10])
@@ -756,17 +837,17 @@ class SolarParser:
             if dc_comp is not None and 0 <= dc_comp <= 500:
                 state["output_dc_comp"] = dc_comp
 
-        # Energy counters
+        # Energy counters -> COST
         vals = parsed.get("COST", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_cost_energy(vals))
 
-        # BMS capacities
+        # BMS capacities -> uxJp
         vals = parsed.get("uxJp", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_bms_capacity(vals))
 
-        # BMS cell list
+        # BMS cell list -> v09K
         vals = parsed.get("v09K", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_cell_list(vals))
@@ -868,6 +949,39 @@ class ArpSpoofer:
 arp_spoofer = ArpSpoofer()
 
 
+def handle_inverter_tcp_packet(pkt) -> None:
+    if Raw not in pkt:
+        return
+
+    payload = bytes(pkt[Raw].load)
+    if not payload:
+        return
+
+    flow_key = (pkt[IP].src, int(pkt[TCP].sport), pkt[IP].dst, int(pkt[TCP].dport))
+    seq = int(pkt[TCP].seq)
+
+    packets = append_stream_data(flow_key, seq, payload)
+
+    if not packets:
+        return
+
+    for packet in packets:
+        if LOG_VERBOSE:
+            ptype = mqtt_type_name(packet[0])
+            log(
+                f"[MQTT PACKET] {pkt[IP].src}:{int(pkt[TCP].sport)} -> "
+                f"{pkt[IP].dst}:{int(pkt[TCP].dport)} type={ptype} len={len(packet)} "
+                f"first16={packet[:16].hex()}"
+            )
+
+        if ((packet[0] >> 4) & 0x0F) == 3:
+            topic, publish_payload = extract_publish_payload(packet)
+            if LOG_VERBOSE and topic is not None:
+                log(f"[MQTT PUBLISH] topic={topic} payload_len={len(publish_payload or b'')}")
+            if publish_payload:
+                SolarParser.parse_payload(publish_payload)
+
+
 def packet_callback(pkt) -> None:
     global INV_MAC, RTR_MAC, LAST_PACKET_TS
 
@@ -895,37 +1009,16 @@ def packet_callback(pkt) -> None:
         port = f":{pkt[TCP].dport}" if TCP in pkt else ""
         log(f"[X-RAY] {src_ip} ({src_mac}) -> {dst_ip}{port} [{proto}]")
 
+    # Inverter -> cloud
     if src_ip == INVERTER_IP:
         if INV_MAC and src_mac != INV_MAC:
             return
 
         if TCP in pkt and dst_ip == TARGET_HOST and int(pkt[TCP].dport) == TARGET_PORT:
-            if Raw in pkt:
-                payload = bytes(pkt[Raw].load)
-                if payload:
-                    flow_key = (src_ip, int(pkt[TCP].sport), dst_ip, int(pkt[TCP].dport))
-                    seq = int(pkt[TCP].seq)
-
-                    if is_duplicate_segment(flow_key, seq, payload):
-                        return
-
-                    packets = extract_mqtt_packets(flow_key, payload)
-
-                    for packet in packets:
-                        if LOG_VERBOSE:
-                            ptype = mqtt_type_name(packet[0])
-                            log(
-                                f"[MQTT PACKET] {src_ip}:{int(pkt[TCP].sport)} -> "
-                                f"{dst_ip}:{int(pkt[TCP].dport)} type={ptype} len={len(packet)} "
-                                f"first16={packet[:16].hex()}"
-                            )
-
-                        if ((packet[0] >> 4) & 0x0F) == 3:
-                            topic, publish_payload = extract_publish_payload(packet)
-                            if LOG_VERBOSE and topic is not None:
-                                log(f"[MQTT PUBLISH] topic={topic} payload_len={len(publish_payload or b'')}")
-                            if publish_payload:
-                                SolarParser.parse_payload(publish_payload)
+            try:
+                handle_inverter_tcp_packet(pkt)
+            except Exception as exc:
+                log(f"[TCP PARSE ERROR] {exc}")
 
             if AUTO_INTERCEPT and RTR_MAC:
                 try:
@@ -935,6 +1028,7 @@ def packet_callback(pkt) -> None:
                     log(f"[FWD ERROR] inverter->router {exc}")
         return
 
+    # Router -> inverter
     if dst_ip == INVERTER_IP:
         if RTR_MAC and src_mac != RTR_MAC:
             return
@@ -988,7 +1082,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.3.5 mains-debug ---")
+    log("--- Inverter Bridge 2.3.6 stable-parser ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
@@ -999,10 +1093,6 @@ if __name__ == "__main__":
     LAST_STATE.update({
         "mains_apparent_va": None,
         "mains_power_w": None,
-        "dbg_yavb_raw": None,
-        "dbg_eo8w_raw": None,
-        "dbg_wdrr_raw": None,
-        "dbg_2l0e_raw": None,
     })
 
     start_mqtt()
