@@ -63,6 +63,13 @@ MAX_MQTT_PACKET = 1024 * 64
 STREAM_STALE_SECONDS = 30
 MAX_STREAM_BUFFER = 1024 * 256
 
+HYBRID_DEBUG_BLOCKS = {
+    "Yavb": "dbg_yavb_raw",
+    "WdRR": "dbg_wdrr_raw",
+    "eo8w": "dbg_eo8w_raw",
+    "2l0E": "dbg_2l0e_raw",
+}
+
 
 def log(message: str) -> None:
     print(message, flush=True)
@@ -145,6 +152,12 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bms_min_cell_pos": sensor("BMS Min Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_max_cell_pos": sensor("BMS Max Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_cell_delta_mv": sensor("BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
+
+    # Hybrid debug
+    "dbg_yavb_raw": sensor("DEBUG Yavb Raw", icon="mdi:bug-outline"),
+    "dbg_wdrr_raw": sensor("DEBUG WdRR Raw", icon="mdi:bug-outline"),
+    "dbg_eo8w_raw": sensor("DEBUG eo8w Raw", icon="mdi:bug-outline"),
+    "dbg_2l0e_raw": sensor("DEBUG 2l0E Raw", icon="mdi:bug-outline"),
 }
 
 for i in range(1, 17):
@@ -687,9 +700,18 @@ class SolarParser:
         return state
 
     @staticmethod
+    def _apply_hybrid_debug(state: Dict[str, object], parsed: Dict[str, Tuple[str, List[str]]]) -> None:
+        for block_name, state_key in HYBRID_DEBUG_BLOCKS.items():
+            if block_name in parsed:
+                raw_text = parsed[block_name][0]
+                state[state_key] = raw_text[:250]
+
+    @staticmethod
     def _try_ascii_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
         state: Dict[str, object] = {}
         parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
+
+        SolarParser._apply_hybrid_debug(state, parsed)
 
         # Keep unresolved mains fields intentionally unknown
         state["mains_apparent_va"] = None
@@ -1009,7 +1031,6 @@ def packet_callback(pkt) -> None:
         port = f":{pkt[TCP].dport}" if TCP in pkt else ""
         log(f"[X-RAY] {src_ip} ({src_mac}) -> {dst_ip}{port} [{proto}]")
 
-    # Inverter -> cloud
     if src_ip == INVERTER_IP:
         if INV_MAC and src_mac != INV_MAC:
             return
@@ -1028,7 +1049,6 @@ def packet_callback(pkt) -> None:
                     log(f"[FWD ERROR] inverter->router {exc}")
         return
 
-    # Router -> inverter
     if dst_ip == INVERTER_IP:
         if RTR_MAC and src_mac != RTR_MAC:
             return
@@ -1082,7 +1102,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.3.6 stable-parser ---")
+    log("--- Inverter Bridge 2.3.7 hybrid-debug ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
