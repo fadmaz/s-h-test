@@ -108,6 +108,13 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "mains_apparent_va": sensor("Mains Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
     "mains_power_w": sensor("Mains Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-export"),
 
+    # Mains candidate sensors
+    "mains_flow_state": sensor("Mains Flow State", icon="mdi:swap-horizontal-bold"),
+    "mains_wdrr_token": sensor("Mains WdRR Token", icon="mdi:code-string"),
+    "mains_wdrr_value": sensor("Mains WdRR Value", state_class="measurement", icon="mdi:numeric"),
+    "mains_wdrr_abs": sensor("Mains WdRR Absolute", state_class="measurement", icon="mdi:counter"),
+    "mains_eo8w_code": sensor("Mains eo8w Code", icon="mdi:code-tags"),
+
     # Output / load
     "out_v": sensor("Output Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:power-plug"),
     "out_hz": sensor("Output Frequency", unit="Hz", device_class="frequency", state_class="measurement", icon="mdi:current-ac"),
@@ -153,7 +160,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bms_max_cell_pos": sensor("BMS Max Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_cell_delta_mv": sensor("BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
 
-    # Hybrid debug
+    # Debug
     "dbg_yavb_raw": sensor("DEBUG Yavb Raw", icon="mdi:bug-outline"),
     "dbg_wdrr_raw": sensor("DEBUG WdRR Raw", icon="mdi:bug-outline"),
     "dbg_eo8w_raw": sensor("DEBUG eo8w Raw", icon="mdi:bug-outline"),
@@ -277,6 +284,11 @@ def on_connect(_client, _userdata, _flags, rc, _properties=None):
             LAST_STATE.update({
                 "mains_apparent_va": None,
                 "mains_power_w": None,
+                "mains_flow_state": None,
+                "mains_wdrr_token": None,
+                "mains_wdrr_value": None,
+                "mains_wdrr_abs": None,
+                "mains_eo8w_code": None,
             })
         client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
     else:
@@ -633,6 +645,23 @@ class SolarParser:
             return None
 
     @staticmethod
+    def _extract_alpha_code(text: str) -> Optional[str]:
+        parts = re.findall(r"[A-Z]+", text)
+        if not parts:
+            return None
+        return " ".join(parts)
+
+    @staticmethod
+    def _mains_flow_from_signed(raw_value: Optional[int]) -> Optional[str]:
+        if raw_value is None:
+            return None
+        if raw_value > 0:
+            return "Mains To Inverter"
+        if raw_value < 0:
+            return "Inverter To Mains"
+        return "Idle"
+
+    @staticmethod
     def _parse_cost_energy(tokens: List[str]) -> Dict[str, object]:
         state: Dict[str, object] = {}
         work = list(tokens)
@@ -707,13 +736,37 @@ class SolarParser:
                 state[state_key] = raw_text[:250]
 
     @staticmethod
+    def _apply_mains_candidates(state: Dict[str, object], parsed: Dict[str, Tuple[str, List[str]]]) -> None:
+        wdrr_tokens = parsed.get("WdRR", ("", []))[1]
+        eo8w_text = parsed.get("eo8w", ("", []))[0]
+
+        raw_token = None
+        raw_value = None
+
+        if len(wdrr_tokens) >= 7:
+            raw_token = wdrr_tokens[6]
+            raw_value = SolarParser._to_int_strict(raw_token)
+
+        if raw_token is not None:
+            state["mains_wdrr_token"] = raw_token
+        if raw_value is not None:
+            state["mains_wdrr_value"] = raw_value
+            state["mains_wdrr_abs"] = abs(raw_value)
+            state["mains_flow_state"] = SolarParser._mains_flow_from_signed(raw_value)
+
+        eo8w_code = SolarParser._extract_alpha_code(eo8w_text)
+        if eo8w_code:
+            state["mains_eo8w_code"] = eo8w_code
+
+    @staticmethod
     def _try_ascii_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
         state: Dict[str, object] = {}
         parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
 
         SolarParser._apply_hybrid_debug(state, parsed)
+        SolarParser._apply_mains_candidates(state, parsed)
 
-        # Keep unresolved mains fields intentionally unknown
+        # Keep unresolved real mains sensors unknown until mapped correctly
         state["mains_apparent_va"] = None
         state["mains_power_w"] = None
 
@@ -731,7 +784,7 @@ class SolarParser:
             if len(fw_tokens) >= 3:
                 state["firmware_build_slot"] = fw_tokens[2]
 
-        # OUTPUT / LOAD block -> 2l0E
+        # Output / load block -> 2l0E
         vals = parsed.get("2l0E", ("", []))[1]
         if len(vals) >= 2:
             out_v = SolarParser._to_float(vals[0])
@@ -754,7 +807,7 @@ class SolarParser:
             if load_pct is not None and 0 <= load_pct <= 100:
                 state["load_pct"] = load_pct
 
-        # GRID block -> WdRR
+        # Grid block -> WdRR
         vals = parsed.get("WdRR", ("", []))[1]
         if len(vals) >= 2:
             grid_v = SolarParser._to_float(vals[0])
@@ -764,7 +817,7 @@ class SolarParser:
             if grid_hz is not None:
                 state["grid_hz"] = round(grid_hz, 1)
 
-        # BATTERY block -> 2ONL
+        # Battery block -> 2ONL
         vals = parsed.get("2ONL", ("", []))[1]
         if len(vals) >= 3:
             series_count = SolarParser._to_int_strict(vals[0])
@@ -1102,7 +1155,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.3.7 hybrid-debug ---")
+    log("--- Inverter Bridge 2.3.8 mains-candidate ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
@@ -1113,6 +1166,11 @@ if __name__ == "__main__":
     LAST_STATE.update({
         "mains_apparent_va": None,
         "mains_power_w": None,
+        "mains_flow_state": None,
+        "mains_wdrr_token": None,
+        "mains_wdrr_value": None,
+        "mains_wdrr_abs": None,
+        "mains_eo8w_code": None,
     })
 
     start_mqtt()
