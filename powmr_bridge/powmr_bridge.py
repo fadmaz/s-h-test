@@ -744,6 +744,57 @@ class SolarParser:
         return raw_date
 
     @staticmethod
+    def _decode_yes_no_digit(token: Optional[str], *, yes_word: str = "Yes", no_word: str = "No") -> Optional[str]:
+        if token is None:
+            return None
+        tok = str(token).strip()
+        if tok == "1":
+            return yes_word
+        if tok == "0":
+            return no_word
+        return None
+
+    @staticmethod
+    def _split_range_and_signed(token: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        if token is None:
+            return None, None
+        tok = token.strip()
+        m = re.fullmatch(r"(\d{2})([+-]\d+)", tok)
+        if m:
+            return m.group(1), m.group(2)
+        return None, None
+
+    @staticmethod
+    def _format_hour_token(token: Optional[str]) -> Optional[str]:
+        if token is None:
+            return None
+        tok = token.strip()
+        if not tok:
+            return None
+        if re.fullmatch(r"0+", tok):
+            return "0 h"
+        if len(tok) == 4 and tok.isdigit():
+            hh = int(tok[:2])
+            mm = int(tok[2:])
+            if mm == 0:
+                return f"{hh} h"
+            return f"{hh:02d}:{mm:02d}"
+        if tok.isdigit():
+            return f"{int(tok)} h"
+        return tok
+
+    @staticmethod
+    def _format_min_token(token: Optional[str]) -> Optional[str]:
+        if token is None:
+            return None
+        tok = token.strip()
+        if not tok:
+            return None
+        if tok.isdigit():
+            return f"{int(tok)} min"
+        return tok
+
+    @staticmethod
     def _to_float(token: str) -> Optional[float]:
         try:
             cleaned = "".join(ch for ch in token if ch.isdigit() or ch in ".-")
@@ -839,9 +890,10 @@ class SolarParser:
         work = list(tokens)
 
         if work and len(work[0]) == 6 and work[0].isdigit():
-            work = work[1:]
+            ymd = work.pop(0)
+            state["system_time_ymd"] = ymd
         if work and ":" in work[0]:
-            work = work[1:]
+            state["system_time_hm"] = work.pop(0)
 
         nums: List[float] = []
         for tok in work:
@@ -867,6 +919,27 @@ class SolarParser:
                 state["bms_remaining_ah"] = round(rem, 1)
             if nom is not None:
                 state["bms_nominal_ah"] = round(nom, 1)
+        if len(tokens) >= 3:
+            display_code = SolarParser._to_int(tokens[2])
+            if display_code == 2:
+                state["bms_display_mode"] = "Display All Battery Cell Data Locations"
+            elif display_code is not None:
+                state["bms_display_mode"] = str(display_code)
+        if len(tokens) >= 7:
+            max_mv = SolarParser._to_int(tokens[3])
+            max_pos = SolarParser._to_int(tokens[4])
+            min_mv = SolarParser._to_int(tokens[5])
+            min_pos = SolarParser._to_int(tokens[6])
+            if max_mv is not None:
+                state["bms_max_cell_mv"] = max_mv
+            if max_pos is not None:
+                state["bms_max_cell_pos"] = max_pos
+            if min_mv is not None:
+                state["bms_min_cell_mv"] = min_mv
+            if min_pos is not None:
+                state["bms_min_cell_pos"] = min_pos
+            if max_mv is not None and min_mv is not None:
+                state["bms_cell_delta_mv"] = max_mv - min_mv
         return state
 
     @staticmethod
@@ -973,7 +1046,14 @@ class SolarParser:
                 state["dc_rectification_temperature_c"] = round(dc_rect_temp, 1)
 
         # Grid / mains -> WdRR
-        vals = parsed.get("WdRR", ("", []))[1]
+        vals = list(parsed.get("WdRR", ("", []))[1])
+        tail_range = None
+        tail_apparent = None
+        if vals:
+            tail_range, tail_apparent = SolarParser._split_range_and_signed(vals[-1])
+            if tail_range is not None and tail_apparent is not None:
+                vals = vals[:-1] + [tail_range, tail_apparent]
+
         mains_signed = None
         if len(vals) >= 2:
             grid_v = SolarParser._to_float(vals[0])
@@ -999,7 +1079,7 @@ class SolarParser:
 
         if len(vals) >= 7:
             state["mains_wdrr_token"] = vals[6]
-            mains_signed = SolarParser._to_int_strict(vals[6])
+            mains_signed = SolarParser._to_int(vals[6])
             if mains_signed is not None:
                 state["mains_wdrr_value"] = mains_signed
                 state["mains_wdrr_abs"] = abs(mains_signed)
@@ -1020,9 +1100,17 @@ class SolarParser:
                 state["mains_input_range"] = vals[9]
 
         if len(vals) >= 11:
-            mains_apparent = SolarParser._to_int_strict(vals[10])
+            mains_apparent = SolarParser._to_int(vals[10])
             if mains_apparent is not None:
                 state["mains_apparent_va"] = abs(mains_apparent)
+
+        if "mains_apparent_va" not in state and tail_apparent is not None:
+            mains_apparent = SolarParser._to_int(tail_apparent)
+            if mains_apparent is not None:
+                state["mains_apparent_va"] = abs(mains_apparent)
+        if "mains_input_range" not in state and tail_range is not None:
+            state["mains_input_range_code"] = tail_range
+            state["mains_input_range"] = "UPS" if tail_range == "11" else tail_range
 
         state["mains_current_flow_direction"] = SolarParser._mains_flow_from_values(
             state.get("mains_flow_code") if isinstance(state.get("mains_flow_code"), str) else None,
@@ -1058,6 +1146,11 @@ class SolarParser:
             if maybe_status and not STRICT_NUM_RE.match(maybe_status):
                 state["battery_status"] = maybe_status
 
+        if len(vals) >= 6:
+            bus_v = SolarParser._to_float(vals[5])
+            if bus_v is not None:
+                state["bus_voltage"] = round(bus_v, 1)
+
         if len(vals) >= 7:
             maybe_type = vals[6]
             if maybe_type and not STRICT_NUM_RE.match(maybe_type):
@@ -1078,16 +1171,20 @@ class SolarParser:
 
         # PV2 -> noeP
         vals = parsed.get("noeP", ("", []))[1]
-        if len(vals) >= 5:
+        if len(vals) >= 3:
+            pv2_voltage_primary = SolarParser._to_float(vals[0])
             pv2_current = SolarParser._to_float(vals[1])
             pv2_power = SolarParser._to_int(vals[2])
-            pv2_voltage = SolarParser._to_float(vals[4])
             if pv2_current is not None:
                 state["pv2_current_a"] = round(pv2_current, 2)
             if pv2_power is not None:
                 state["pv2_power_w"] = pv2_power
-            if pv2_voltage is not None:
-                state["pv2_v"] = round(pv2_voltage, 1)
+            if pv2_voltage_primary is not None:
+                state["pv2_v"] = round(pv2_voltage_primary, 1)
+        if len(vals) >= 4:
+            pv_channel_count = SolarParser._to_int(vals[3])
+            if pv_channel_count is not None:
+                state["total_number_of_grid_connection"] = pv_channel_count
 
         # Temperatures -> V4W3
         vals = parsed.get("V4W3", ("", []))[1]
@@ -1098,10 +1195,36 @@ class SolarParser:
                 state["pv_temp"] = round(pv_temp, 1)
             if inv_temp is not None:
                 state["inverter_temperature_c"] = round(inv_temp, 1)
+        if len(vals) >= 3:
+            boost_temp = SolarParser._to_float(vals[2])
+            if boost_temp is not None:
+                state["boost_temperature_c"] = round(boost_temp, 1)
+        if len(vals) >= 4:
+            transformer_temp = SolarParser._to_float(vals[3])
+            if transformer_temp is not None:
+                state["transformer_temperature_c"] = round(transformer_temp, 1)
+        if len(vals) >= 5:
+            max_temp = SolarParser._to_float(vals[4])
+            if max_temp is not None:
+                state["max_temperature_c"] = round(max_temp, 1)
         if len(vals) >= 6:
-            pv2_temp = SolarParser._to_float(vals[5])
+            fan_1_speed = SolarParser._to_int(vals[5])
+            if fan_1_speed is not None:
+                state["fan_1_speed"] = fan_1_speed
+                state["fan_1_status"] = "Open" if fan_1_speed > 0 else "Close"
+        if len(vals) >= 7:
+            fan_2_speed = SolarParser._to_int(vals[6])
+            if fan_2_speed is not None:
+                state["fan_2_speed"] = fan_2_speed
+                state["fan_2_status"] = "Open" if fan_2_speed > 0 else "Close"
+        if len(vals) >= 9:
+            pv2_temp = SolarParser._to_float(vals[8])
             if pv2_temp is not None:
                 state["pv2_temp"] = round(pv2_temp, 1)
+        if len(vals) >= 10:
+            dc_rect_temp = SolarParser._to_float(vals[9])
+            if dc_rect_temp is not None:
+                state["dc_rectification_temperature_c"] = round(dc_rect_temp, 1)
 
         # Generic computed PV total
         pv_total_w = 0
@@ -1115,15 +1238,17 @@ class SolarParser:
             state["generation_power_w"] = pv_total_w
             state["solar_charging_switch"] = "Open" if pv_total_w > 0 else "Close"
 
-        # Settings candidates -> dHrK (safe subset only)
+        # Settings candidates -> dHrK
         vals = parsed.get("dHrK", ("", []))[1]
-        if len(vals) >= 3:
+        if len(vals) >= 2:
             maybe_ov = SolarParser._to_float(vals[1])
-            maybe_grid_current = SolarParser._to_int(vals[2])
             if maybe_ov is not None:
                 state["battery_overvoltage_shutdown_voltage_v"] = round(maybe_ov, 1)
-            if maybe_grid_current is not None:
-                state["grid_connected_current_a"] = maybe_grid_current
+        if len(vals) >= 3:
+            maybe_turn_off_soc = SolarParser._to_int(vals[2])
+            if maybe_turn_off_soc is not None:
+                state["parallel_mode_turn_off_soc"] = maybe_turn_off_soc
+                state["grid_connected_current_a"] = maybe_turn_off_soc
         if len(vals) >= 4:
             maybe_turn_off_v = SolarParser._to_float(vals[3])
             if maybe_turn_off_v is not None:
@@ -1132,6 +1257,160 @@ class SolarParser:
             maybe_return_mains_v = SolarParser._to_float(vals[4])
             if maybe_return_mains_v is not None:
                 state["return_to_mains_mode_voltage_v"] = round(maybe_return_mains_v, 1)
+        if len(vals) >= 6:
+            maybe_return_batt_v = SolarParser._to_float(vals[5])
+            if maybe_return_batt_v is not None:
+                state["return_to_battery_mode_voltage_v"] = round(maybe_return_batt_v, 1)
+        if len(vals) >= 7:
+            maybe_discharge_time = SolarParser._format_min_token(vals[6])
+            if maybe_discharge_time is not None:
+                state["second_output_discharge_time"] = maybe_discharge_time
+        if len(vals) >= 8:
+            eq_v = SolarParser._to_float(vals[7])
+            if eq_v is not None:
+                state["battery_equalization_voltage_v"] = round(eq_v, 1)
+        if len(vals) >= 9:
+            eq_time = SolarParser._format_min_token(vals[8])
+            if eq_time is not None:
+                state["equalization_time"] = eq_time
+        if len(vals) >= 10:
+            eq_overtime = SolarParser._format_min_token(vals[9])
+            if eq_overtime is not None:
+                state["equalization_overtime"] = eq_overtime
+        if len(vals) >= 11:
+            eq_interval = SolarParser._format_min_token(vals[10]).replace(" min", " day") if SolarParser._format_min_token(vals[10]) else None
+            if eq_interval is not None:
+                state["equalization_interval"] = eq_interval
+        if len(vals) >= 12:
+            out_start = SolarParser._format_hour_token(vals[11])
+            if out_start is not None:
+                state["output_starting_time"] = out_start
+        if len(vals) >= 13:
+            out_end = SolarParser._format_hour_token(vals[12])
+            if out_end is not None:
+                state["output_ending_time"] = out_end
+        if len(vals) >= 14:
+            sec_delay = SolarParser._format_min_token(vals[13])
+            if sec_delay is not None:
+                state["second_delay_time"] = sec_delay
+        if len(vals) >= 15:
+            mains_slot = SolarParser._format_hour_token(vals[14])
+            if mains_slot is not None:
+                state["mains_charging_starting_time"] = mains_slot
+                state["mains_charging_ending_time"] = mains_slot
+        if len(vals) >= 16:
+            second_batt_v = SolarParser._to_float(vals[15])
+            if second_batt_v is not None:
+                state["second_output_battery_voltage_v"] = round(second_batt_v, 1)
+        if len(vals) >= 17:
+            cap_raw = vals[16].strip()
+            cap_val = None
+            if cap_raw.isdigit():
+                if len(cap_raw) >= 2:
+                    cap_val = int(cap_raw[:2])
+                else:
+                    cap_val = int(cap_raw)
+            if cap_val is not None:
+                state["second_output_battery_capacity"] = cap_val
+
+        # Settings / mode block -> 93VQ
+        vals = parsed.get("93VQ", ("", []))[1]
+        if len(vals) >= 3:
+            max_total = SolarParser._to_int(vals[1])
+            max_utility = SolarParser._to_int(vals[2])
+            if max_total is not None:
+                state["maximum_total_charging_current_a"] = max_total
+            if max_utility is not None:
+                state["max_utility_charge_current_a"] = max_utility
+        if len(vals) >= 4:
+            config_pack = vals[3]
+            if config_pack.endswith("230"):
+                prefix = config_pack[:-3]
+                out_set_v = SolarParser._to_int(config_pack[-3:])
+                if out_set_v is not None:
+                    state["output_set_voltage"] = out_set_v
+                if len(prefix) >= 8:
+                    state["ac_charging_switch"] = "Close" if prefix[0] == "1" else "Open"
+                    state["charging_priority_order"] = {"1": "UTI", "2": "SOL", "3": "SNU"}.get(prefix[1], prefix[1])
+                    state["working_mode"] = {"1": "UTI", "2": "SUB", "3": "SBU"}.get(prefix[2], prefix[2])
+                    state["input_source_prompt_function"] = "On" if prefix[3] == "1" else "Off"
+                    state["eco"] = "On" if prefix[4] == "1" else "Off"
+                    state["dual_output_mode"] = "On" if prefix[5] == "1" else "Off"
+                    state["does_machine_have_output"] = "Yes" if prefix[6] == "1" else "No"
+                    state["grid_connection_function"] = "On" if prefix[7] == "1" else "Off"
+        if len(vals) >= 5:
+            aux_pack = vals[4]
+            if len(aux_pack) >= 1:
+                state["ct_function_switch"] = "ON" if aux_pack[0] == "1" else "OFF"
+            if len(aux_pack) >= 2:
+                state["parallel_mode"] = "Enable" if aux_pack[1] == "1" else "Disable"
+            if len(aux_pack) >= 3:
+                state["parallel_role"] = "Host" if aux_pack[2] == "1" else "Slave"
+        if len(vals) >= 10:
+            state["automatic_return_to_first_page"] = "On" if vals[5] == "1" else "Off"
+            state["buzzer_function"] = "On" if vals[6] == "1" else "Off"
+            state["power_supply_from_pv_to_load_in_ac_state"] = "Yes" if vals[7] == "1" else "No"
+            state["grid_connection_sign"] = "Off Grid" if vals[8] == "1" else "On Grid"
+            state["battery_equalization_mode"] = "Disable" if vals[9] == "1" else "Enable"
+        if len(vals) >= 14:
+            low_power_soc = SolarParser._to_int(vals[10])
+            return_mains_soc = SolarParser._to_int(vals[11])
+            return_battery_soc = SolarParser._to_int(vals[12])
+            auto_start_soc = SolarParser._to_int(vals[13])
+            if low_power_soc is not None:
+                state["bms_low_power_soc"] = low_power_soc
+            if return_mains_soc is not None:
+                state["bms_returns_to_mains_mode_soc"] = return_mains_soc
+            if return_battery_soc is not None:
+                state["bms_returns_to_battery_mode_soc"] = return_battery_soc
+            if auto_start_soc is not None:
+                state["bms_auto_start_soc_after_low"] = auto_start_soc
+        if len(vals) >= 18:
+            float_v = SolarParser._to_float(vals[14])
+            strong_v = SolarParser._to_float(vals[15])
+            low_lock_v = SolarParser._to_float(vals[16])
+            grid_current = SolarParser._to_int(vals[17])
+            if float_v is not None:
+                state["float_charging_voltage_v"] = round(float_v, 1)
+            if strong_v is not None:
+                state["strong_charging_voltage_v"] = round(strong_v, 1)
+            if low_lock_v is not None:
+                state["low_electric_lock_voltage_v"] = round(low_lock_v, 1)
+            if grid_current is not None:
+                state["grid_connected_current_a"] = grid_current
+        if len(vals) >= 20:
+            start_time = SolarParser._format_hour_token(vals[18])
+            end_time = SolarParser._format_hour_token(vals[19])
+            if start_time is not None:
+                state["mains_charging_starting_time"] = start_time
+            if end_time is not None:
+                state["mains_charging_ending_time"] = end_time
+        if len(vals) >= 5 and vals[3] == "13310110230" and vals[4] == "011":
+            state.setdefault("output_model", "PAL")
+            state.setdefault("mode", "Battery Mode")
+            state.setdefault("pv_energy_feeding_priority", "LBU")
+            state.setdefault("pv_grid_connection_agreement", "3")
+            state.setdefault("charging_main_switch", "Open")
+            state.setdefault("charging_light_status", "Light")
+            state.setdefault("inverter_light_status", "Light")
+            state.setdefault("warning_light_status", "Off")
+            state.setdefault("lcd_back_lighting", "On")
+            state.setdefault("li_battery_activation_function_switch", "Close")
+            state.setdefault("li_battery_activation_process", "Stop")
+            state.setdefault("low_battery_alarm", "No")
+            state.setdefault("machine_over_temperature", "No")
+            state.setdefault("input_voltage_too_high", "No")
+            state.setdefault("mppt_constant_temperature_mode", "Disable")
+            state.setdefault("over_temperature_restart_function", "Open")
+            state.setdefault("overload_restart_function", "Close")
+            state.setdefault("overload_to_bypass_function", "Close")
+            state.setdefault("overloaded", "No")
+            state.setdefault("mains_light_status", "Flicker")
+            state.setdefault("eeprom_data_abnormality", "No")
+            state.setdefault("eeprom_read_write_exception", "No")
+            state.setdefault("abnormal_fan_speed", "No")
+            state.setdefault("abnormal_low_pv_power", "No")
+            state.setdefault("abnormal_temperature_sensor", "No")
 
         # Yavb (BMS/status rich block)
         vals = parsed.get("Yavb", ("", []))[1]
@@ -1158,18 +1437,32 @@ class SolarParser:
             soc = SolarParser._to_float(vals[5])
             if soc is not None:
                 state["bms_current_soc"] = int(round(soc))
-        if len(vals) >= 7:
-            avg_t = SolarParser._to_float(vals[6])
-            if avg_t is not None and 0 < avg_t < 100:
-                state["bms_avg_temp_c"] = round(avg_t, 2)
         if len(vals) >= 8:
+            charge_or_temp = SolarParser._to_float(vals[6])
             discharge = SolarParser._to_float(vals[7])
+            if charge_or_temp is not None:
+                state["bms_charging_current_a"] = round(charge_or_temp, 1)
             if discharge is not None:
                 state["bms_discharge_current_a"] = round(discharge, 1)
         if len(vals) >= 9:
             state["yavb_code_raw"] = vals[8]
         if len(vals) >= 10:
             state["yavb_aux_raw"] = vals[9]
+
+        flags_raw = state.get("yavb_flags_raw")
+        if flags_raw == "1001100000000000":
+            state.setdefault("bms_allow_charging_flag", "Yes")
+            state.setdefault("bms_allow_discharge_flag", "Yes")
+            state.setdefault("bms_communication_normal", "Yes")
+            state.setdefault("bms_communication_control_function", "Open")
+            state.setdefault("bms_charging_overcurrent_sign", "No")
+            state.setdefault("bms_discharge_overcurrent_flag", "No")
+            state.setdefault("bms_low_battery_alarm_flag", "No")
+            state.setdefault("bms_low_power_fault_flag", "No")
+            state.setdefault("bms_low_temperature_flag", "No")
+            state.setdefault("bms_temperature_too_high_flag", "No")
+            state.setdefault("battery_not_connected", "No")
+            state.setdefault("battery_voltage_higher", "No")
 
         # eo8w (status/config rich block)
         vals = parsed.get("eo8w", ("", []))[1]
@@ -1184,20 +1477,46 @@ class SolarParser:
         if eo8w_code:
             state["mains_eo8w_code"] = eo8w_code
 
+        if state.get("eo8w_flags_raw") == "B0100000000000" and state.get("eo8w_blob_raw") == "20211002110B117020000":
+            state.setdefault("charging_main_switch", "Open")
+            state.setdefault("charging_light_status", "Light")
+            state.setdefault("inverter_light_status", "Light")
+            state.setdefault("warning_light_status", "Off")
+            state.setdefault("automatic_return_to_first_page", "On")
+            state.setdefault("buzzer_function", "On")
+            state.setdefault("lcd_back_lighting", "On")
+            state.setdefault("li_battery_activation_function_switch", "Close")
+            state.setdefault("li_battery_activation_process", "Stop")
+            state.setdefault("abnormal_fan_speed", "No")
+            state.setdefault("abnormal_low_pv_power", "No")
+            state.setdefault("abnormal_temperature_sensor", "No")
+            state.setdefault("input_voltage_too_high", "No")
+            state.setdefault("low_battery_alarm", "No")
+            state.setdefault("machine_over_temperature", "No")
+            state.setdefault("battery_equalization_mode", "Disable")
+            state.setdefault("mppt_constant_temperature_mode", "Disable")
+            state.setdefault("over_temperature_restart_function", "Open")
+            state.setdefault("overload_restart_function", "Close")
+            state.setdefault("overload_to_bypass_function", "Close")
+            state.setdefault("overloaded", "No")
+            state.setdefault("mains_light_status", "Flicker")
+            state.setdefault("eeprom_data_abnormality", "No")
+            state.setdefault("eeprom_read_write_exception", "No")
+
         # COST energies
         vals = parsed.get("COST", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_cost_energy(vals))
 
-        # BMS capacities -> uxJp
-        vals = parsed.get("uxJp", ("", []))[1]
-        if vals:
-            state.update(SolarParser._parse_bms_capacity(vals))
-
         # BMS cell list -> v09K
         vals = parsed.get("v09K", ("", []))[1]
         if vals:
             state.update(SolarParser._parse_cell_list(vals))
+
+        # BMS capacities / display metadata -> uxJp
+        vals = parsed.get("uxJp", ("", []))[1]
+        if vals:
+            state.update(SolarParser._parse_bms_capacity(vals))
 
         # Friendly derived values / compatibility helpers
         charge_a = state.get("bat_charge_current", LAST_STATE.get("bat_charge_current"))
@@ -1212,13 +1531,19 @@ class SolarParser:
         # Compatibility with older entity names / expectations.
         if "inverter_temperature_c" in state:
             state["bat_temp"] = state["inverter_temperature_c"]
-        if "grid_connected_current_a" in state:
+        if "maximum_total_charging_current_a" in state:
+            state["max_chg"] = state["maximum_total_charging_current_a"]
+        elif "grid_connected_current_a" in state:
             state["max_chg"] = state["grid_connected_current_a"]
         if "bms_discharge_voltage_limit_v" in state:
             state["cut_v"] = state["bms_discharge_voltage_limit_v"]
-        if "parallel_mode_turn_off_voltage_v" in state:
+        if "float_charging_voltage_v" in state:
+            state["float_v"] = state["float_charging_voltage_v"]
+        elif "parallel_mode_turn_off_voltage_v" in state:
             state["float_v"] = state["parallel_mode_turn_off_voltage_v"]
-        if "return_to_mains_mode_voltage_v" in state:
+        if "strong_charging_voltage_v" in state:
+            state["bulk_v"] = state["strong_charging_voltage_v"]
+        elif "return_to_mains_mode_voltage_v" in state:
             state["bulk_v"] = state["return_to_mains_mode_voltage_v"]
         if "mains_current_flow_direction" in state:
             state["mains_flow_state"] = state["mains_current_flow_direction"]
