@@ -44,6 +44,11 @@ AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"taico/{DEVICE_ID}/availab
 
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 LOG_VERBOSE = os.getenv("LOG_VERBOSE", "true").strip().lower() in {"1", "true", "yes", "on"}
+LOG_BLOCKS = os.getenv("LOG_BLOCKS", "true").strip().lower() in {"1", "true", "yes", "on"}
+LOG_STATE_DIFF = os.getenv("LOG_STATE_DIFF", "true").strip().lower() in {"1", "true", "yes", "on"}
+LOG_STATE_SNAPSHOT = os.getenv("LOG_STATE_SNAPSHOT", "true").strip().lower() in {"1", "true", "yes", "on"}
+LOG_RAW_JSON = os.getenv("LOG_RAW_JSON", "false").strip().lower() in {"1", "true", "yes", "on"}
+LOG_CLEAN_STATE = os.getenv("LOG_CLEAN_STATE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 INV_MAC: Optional[str] = None
 RTR_MAC: Optional[str] = None
@@ -67,6 +72,20 @@ MAX_STREAM_BUFFER = 1024 * 256
 
 def log(message: str) -> None:
     print(message, flush=True)
+
+
+def json_log(value: object) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        return repr(value)
+
+
+def log_kv(tag: str, **kwargs) -> None:
+    parts = []
+    for key, value in kwargs.items():
+        parts.append(f"{key}={json_log(value)}")
+    log(f"{tag} " + " ".join(parts))
 
 
 def norm_mac(mac: Optional[str]) -> Optional[str]:
@@ -1595,6 +1614,9 @@ class SolarParser:
                 raw = raw[: end + 1]
 
             raw_json = json.loads(raw)
+            if LOG_RAW_JSON:
+                log(f"[RAW JSON] {json_log(raw_json)}")
+
             candidate_pairs = SolarParser._walk_for_blocks(raw_json)
 
             blocks: Dict[str, bytes] = {}
@@ -1616,19 +1638,55 @@ class SolarParser:
 
                 blocks[key] = decoded
 
+            if LOG_BLOCKS:
+                log_kv("[BLOCK SUMMARY]", block_count=len(blocks), block_names=sorted(blocks.keys()))
+                for block_name in sorted(blocks.keys()):
+                    raw_text, raw_tokens = SolarParser._parse_ascii_text(blocks[block_name])
+                    log_kv(
+                        "[BLOCK RAW]",
+                        name=block_name,
+                        text=raw_text,
+                        tokens=raw_tokens,
+                        hex_preview=blocks[block_name][:64].hex(),
+                    )
+
             state = SolarParser._try_ascii_schema(blocks)
             if state:
                 clean_state = SolarParser._drop_none_values(state)
                 if not clean_state:
                     return
+
+                previous_state = dict(LAST_STATE)
+                changed_keys = []
+                for key in sorted(clean_state.keys()):
+                    old_val = previous_state.get(key, "__missing__")
+                    new_val = clean_state[key]
+                    if old_val != new_val:
+                        changed_keys.append(key)
+                        if LOG_STATE_DIFF:
+                            log_kv("[STATE CHANGE]", key=key, old=None if old_val == "__missing__" else old_val, new=new_val)
+
+                if LOG_CLEAN_STATE:
+                    log_kv("[CLEAN STATE]", values=clean_state)
+
                 LAST_STATE.update(clean_state)
+
+                if LOG_STATE_SNAPSHOT:
+                    log_kv("[STATE SNAPSHOT]", values=LAST_STATE)
+
                 if DISCOVERY_PUBLISHED:
                     # Publish discovery for any late-bound raw block sensors.
                     for key in clean_state.keys():
                         if key in SENSORS and key not in PUBLISHED_SENSOR_KEYS:
                             publish_sensor_discovery(key)
                     client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
-                log(f"[{datetime.now().strftime('%H:%M:%S')}] Published {len(clean_state)} values to HA")
+
+                log_kv(
+                    f"[{datetime.now().strftime('%H:%M:%S')}] Published to HA",
+                    clean_value_count=len(clean_state),
+                    changed_key_count=len(changed_keys),
+                    changed_keys=changed_keys,
+                )
 
         except Exception as exc:
             log(f"[PARSER ERROR] {exc}")
