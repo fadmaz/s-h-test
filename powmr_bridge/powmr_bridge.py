@@ -412,7 +412,8 @@ def on_connect(_client, _userdata, _flags, rc, _properties=None):
     if code == 0:
         log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}")
         publish_discovery()
-        client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
+        if any(v is not None for v in LAST_STATE.values()):
+            client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
     else:
         log(f"[HA MQTT ERROR] Connection failed with rc={code}")
 
@@ -1116,19 +1117,21 @@ class SolarParser:
 
         mains_flow_code = state.get("mains_flow_code")
         mains_flow_code_str = str(mains_flow_code).strip() if mains_flow_code is not None else None
-        state["mains_current_flow_direction"] = SolarParser._mains_flow_from_values(
+        resolved_flow = SolarParser._mains_flow_from_values(
             mains_flow_code_str,
             mains_signed,
         )
-        if state.get("mains_current_flow_direction") is None:
+        if resolved_flow is None:
             if mains_flow_code_str in {"0", "00"}:
-                state["mains_current_flow_direction"] = "Mains To Inverter"
+                resolved_flow = "Mains To Inverter"
             elif mains_flow_code_str in {"1", "01"}:
-                state["mains_current_flow_direction"] = "Inverter To Mains"
+                resolved_flow = "Inverter To Mains"
             elif mains_flow_code_str in {"2", "02"}:
-                state["mains_current_flow_direction"] = "Idle"
+                resolved_flow = "Idle"
             elif mains_signed == 0 and state.get("mains_apparent_va") == 0:
-                state["mains_current_flow_direction"] = "Mains To Inverter"
+                resolved_flow = "Mains To Inverter"
+        if resolved_flow is not None:
+            state["mains_current_flow_direction"] = resolved_flow
 
         # Battery block -> 2ONL
         vals = parsed.get("2ONL", ("", []))[1]
@@ -1558,12 +1561,17 @@ class SolarParser:
             state["bulk_v"] = state["strong_charging_voltage_v"]
         elif "return_to_mains_mode_voltage_v" in state:
             state["bulk_v"] = state["return_to_mains_mode_voltage_v"]
-        if "mains_current_flow_direction" in state:
+        if state.get("mains_current_flow_direction") is not None:
             state["mains_flow_state"] = state["mains_current_flow_direction"]
         if "battery_type" not in state and LAST_STATE.get("battery_type") is None and "Yavb" in parsed:
             state["battery_type"] = "LIA"
 
         return state
+
+    @staticmethod
+    def _drop_none_values(state: Dict[str, object]) -> Dict[str, object]:
+        return {k: v for k, v in state.items() if v is not None}
+
 
     @staticmethod
     def parse_payload(payload_bytes: bytes) -> None:
@@ -1610,14 +1618,17 @@ class SolarParser:
 
             state = SolarParser._try_ascii_schema(blocks)
             if state:
-                LAST_STATE.update(state)
+                clean_state = SolarParser._drop_none_values(state)
+                if not clean_state:
+                    return
+                LAST_STATE.update(clean_state)
                 if DISCOVERY_PUBLISHED:
                     # Publish discovery for any late-bound raw block sensors.
-                    for key in state.keys():
+                    for key in clean_state.keys():
                         if key in SENSORS and key not in PUBLISHED_SENSOR_KEYS:
                             publish_sensor_discovery(key)
                     client.publish(STATE_TOPIC, json.dumps(LAST_STATE), retain=True)
-                log(f"[{datetime.now().strftime('%H:%M:%S')}] Published {len(state)} values to HA")
+                log(f"[{datetime.now().strftime('%H:%M:%S')}] Published {len(clean_state)} values to HA")
 
         except Exception as exc:
             log(f"[PARSER ERROR] {exc}")
@@ -1795,7 +1806,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Inverter Bridge 2.4.0 app-parity ---")
+    log("--- Inverter Bridge 2.4.3 sticky-state ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
