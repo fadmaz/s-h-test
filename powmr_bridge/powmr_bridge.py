@@ -261,28 +261,28 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "working_mode": sensor("Working Mode", icon="mdi:cog-transfer"),
 
     # Raw / decoded helper sensors
-    "mains_wdrr_token": sensor("Mains WdRR Token", icon="mdi:code-string"),
-    "mains_wdrr_value": sensor("Mains WdRR Value", state_class="measurement", icon="mdi:numeric"),
-    "mains_wdrr_abs": sensor("Mains WdRR Absolute", state_class="measurement", icon="mdi:counter"),
-    "mains_eo8w_code": sensor("Mains eo8w Code", icon="mdi:code-tags"),
-    "wdrr_status_bits": sensor("WdRR Status Bits", icon="mdi:code-brackets"),
-    "eo8w_flags_raw": sensor("eo8w Flags Raw", icon="mdi:code-braces"),
-    "eo8w_blob_raw": sensor("eo8w Blob Raw", icon="mdi:code-json"),
-    "yavb_flags_raw": sensor("Yavb Flags Raw", icon="mdi:code-braces"),
-    "yavb_code_raw": sensor("Yavb Code Raw", icon="mdi:code-tags"),
-    "yavb_aux_raw": sensor("Yavb Aux Raw", icon="mdi:code-json"),
-    "output_status_bits": sensor("Output Status Bits", icon="mdi:code-brackets"),
-    "mains_flow_code": sensor("Mains Flow Code", icon="mdi:numeric"),
-    "mains_input_range_code": sensor("Mains Input Range Code", icon="mdi:code-string"),
+    "mains_wdrr_token": sensor("Mains WdRR Token", icon="mdi:code-string", entity_category="diagnostic", enabled_by_default=False),
+    "mains_wdrr_value": sensor("Mains WdRR Value", state_class="measurement", icon="mdi:numeric", entity_category="diagnostic", enabled_by_default=False),
+    "mains_wdrr_abs": sensor("Mains WdRR Absolute", state_class="measurement", icon="mdi:counter", entity_category="diagnostic", enabled_by_default=False),
+    "mains_eo8w_code": sensor("Mains eo8w Code", icon="mdi:code-tags", entity_category="diagnostic", enabled_by_default=False),
+    "wdrr_status_bits": sensor("WdRR Status Bits", icon="mdi:code-brackets", entity_category="diagnostic", enabled_by_default=False),
+    "eo8w_flags_raw": sensor("eo8w Flags Raw", icon="mdi:code-braces", entity_category="diagnostic", enabled_by_default=False),
+    "eo8w_blob_raw": sensor("eo8w Blob Raw", icon="mdi:code-json", entity_category="diagnostic", enabled_by_default=False),
+    "yavb_flags_raw": sensor("Yavb Flags Raw", icon="mdi:code-braces", entity_category="diagnostic", enabled_by_default=False),
+    "yavb_code_raw": sensor("Yavb Code Raw", icon="mdi:code-tags", entity_category="diagnostic", enabled_by_default=False),
+    "yavb_aux_raw": sensor("Yavb Aux Raw", icon="mdi:code-json", entity_category="diagnostic", enabled_by_default=False),
+    "output_status_bits": sensor("Output Status Bits", icon="mdi:code-brackets", entity_category="diagnostic", enabled_by_default=False),
+    "mains_flow_code": sensor("Mains Flow Code", icon="mdi:numeric", entity_category="diagnostic", enabled_by_default=False),
+    "mains_input_range_code": sensor("Mains Input Range Code", icon="mdi:code-string", entity_category="diagnostic", enabled_by_default=False),
 
     # Compatibility aliases for older entity names
-    "bat_temp": sensor("Inverter Temperature (legacy)", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer"),
-    "max_chg": sensor("Max Charge Current (legacy)", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),
-    "util_chg": sensor("Utility Charge Current (candidate)", unit="A", device_class="current", state_class="measurement", icon="mdi:current-ac"),
-    "bulk_v": sensor("Bulk Charging Voltage (legacy)", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-high"),
-    "float_v": sensor("Float Charging Voltage (legacy)", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-medium"),
-    "cut_v": sensor("Low Battery Cut-off (legacy)", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-off-outline"),
-    "mains_flow_state": sensor("Mains Flow State (legacy)", icon="mdi:swap-horizontal-bold"),
+    "bat_temp": sensor("Inverter Temperature (legacy)", unit="°C", device_class="temperature", state_class="measurement", icon="mdi:thermometer", entity_category="diagnostic", enabled_by_default=False),
+    "max_chg": sensor("Max Charge Current (legacy)", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc", entity_category="diagnostic", enabled_by_default=False),
+    "util_chg": sensor("Utility Charge Current (candidate)", unit="A", device_class="current", state_class="measurement", icon="mdi:current-ac", entity_category="diagnostic", enabled_by_default=False),
+    "bulk_v": sensor("Bulk Charging Voltage (legacy)", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-high", entity_category="diagnostic", enabled_by_default=False),
+    "float_v": sensor("Float Charging Voltage (legacy)", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-charging-medium", entity_category="diagnostic", enabled_by_default=False),
+    "cut_v": sensor("Low Battery Cut-off (legacy)", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-off-outline", entity_category="diagnostic", enabled_by_default=False),
+    "mains_flow_state": sensor("Mains Flow State (legacy)", icon="mdi:swap-horizontal-bold", entity_category="diagnostic", enabled_by_default=False),
 }
 
 for i in range(1, 17):
@@ -389,6 +389,8 @@ def publish_sensor_discovery(key: str) -> None:
         payload["state_class"] = meta["state_class"]
     if meta.get("entity_category"):
         payload["entity_category"] = meta["entity_category"]
+    if "enabled_by_default" in meta:
+        payload["enabled_by_default"] = bool(meta["enabled_by_default"])
 
     client.publish(topic, json.dumps(payload), retain=True)
     PUBLISHED_SENSOR_KEYS.add(key)
@@ -658,7 +660,7 @@ def sanitize_block_key(name: str) -> str:
 def ensure_dynamic_debug_sensor(block_name: str) -> str:
     state_key = f"dbg_{sanitize_block_key(block_name)}_raw"
     if state_key not in SENSORS:
-        SENSORS[state_key] = sensor(f"DEBUG {block_name} Raw", icon="mdi:bug-outline", entity_category="diagnostic")
+        SENSORS[state_key] = sensor(f"DEBUG {block_name} Raw", icon="mdi:bug-outline", entity_category="diagnostic", enabled_by_default=False)
         LAST_STATE.setdefault(state_key, None)
         if DISCOVERY_PUBLISHED:
             publish_sensor_discovery(state_key)
@@ -1112,10 +1114,21 @@ class SolarParser:
             state["mains_input_range_code"] = tail_range
             state["mains_input_range"] = "UPS" if tail_range == "11" else tail_range
 
+        mains_flow_code = state.get("mains_flow_code")
+        mains_flow_code_str = str(mains_flow_code).strip() if mains_flow_code is not None else None
         state["mains_current_flow_direction"] = SolarParser._mains_flow_from_values(
-            state.get("mains_flow_code") if isinstance(state.get("mains_flow_code"), str) else None,
+            mains_flow_code_str,
             mains_signed,
         )
+        if state.get("mains_current_flow_direction") is None:
+            if mains_flow_code_str in {"0", "00"}:
+                state["mains_current_flow_direction"] = "Mains To Inverter"
+            elif mains_flow_code_str in {"1", "01"}:
+                state["mains_current_flow_direction"] = "Inverter To Mains"
+            elif mains_flow_code_str in {"2", "02"}:
+                state["mains_current_flow_direction"] = "Idle"
+            elif mains_signed == 0 and state.get("mains_apparent_va") == 0:
+                state["mains_current_flow_direction"] = "Mains To Inverter"
 
         # Battery block -> 2ONL
         vals = parsed.get("2ONL", ("", []))[1]
