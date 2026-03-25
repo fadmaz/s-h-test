@@ -33,14 +33,14 @@ MQTT_USER = os.getenv("MQTT_USER", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 MQTT_DISCOVERY_PREFIX = os.getenv("MQTT_DISCOVERY_PREFIX", "homeassistant")
-DEVICE_ID = os.getenv("DEVICE_ID", "taico_inverter_1")
-DEVICE_NAME = os.getenv("DEVICE_NAME", "Taico inverter 1")
+DEVICE_ID = os.getenv("DEVICE_ID", "siseli_inverter_1")
+DEVICE_NAME = os.getenv("DEVICE_NAME", "Siseli Inverter 1")
 MODEL_NAME = os.getenv("MODEL_NAME", DEVICE_NAME)
-MANUFACTURER = os.getenv("MANUFACTURER", "Taico")
+MANUFACTURER = os.getenv("MANUFACTURER", "Siseli Compatible")
 ENTITY_PREFIX = os.getenv("ENTITY_PREFIX", "").strip()
 
-STATE_TOPIC = os.getenv("STATE_TOPIC", f"taico/{DEVICE_ID}/state")
-AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"taico/{DEVICE_ID}/availability")
+STATE_TOPIC = os.getenv("STATE_TOPIC", f"siseli/{DEVICE_ID}/state")
+AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"siseli/{DEVICE_ID}/availability")
 
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 LOG_VERBOSE = os.getenv("LOG_VERBOSE", "false").strip().lower() in {"1", "true", "yes", "on"}

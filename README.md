@@ -1,9 +1,25 @@
-# ☀️ PowMr Inverter Home Assistant Bridge (Siseli Interceptor)
+# ☀️ Siseli Solar Cloud Home Assistant Bridge
 
-[![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
-Integrate PowMr inverters (RWB1, 6.2kW, and similar models) into Home Assistant without external clouds. This bridge intercepts the MQTT traffic sent to the Siseli cloud, decodes it, and creates sensors via MQTT Auto-Discovery.
+Integrate inverters compatible with the Siseli Solar Cloud (including RWB1 and similar models) into Home Assistant without external clouds. This bridge intercepts the MQTT traffic sent to the Siseli cloud, decodes it, and creates sensors via MQTT Auto-Discovery.
+
+## 🌟 Supported Brands
+This add-on supports a wide range of inverter brands that utilize the Siseli IoT cloud platform, including but not limited to:
+- Solar of Things
+- LUMINOUS NEO
+- SUN WISE
+- Queen Tech
+- LIB Life
+- Sun house
+- LeiLing
+- SunSaviour
+- ECOmenic
+- HC solar
+- 沐能低碳
+- PowMr
+- Taico
 
 ---
 
@@ -22,7 +38,7 @@ Ensure the official **Mosquitto Broker** add-on is installed and configured:
 4. Paste the URL and click **Add**.
 
 ### Step 3: Install & Configure
-1. Find **PowMr Inverter Bridge** in the store and click **Install**.
+1. Find **Siseli Inverter Bridge** in the store and click **Install**.
 2. Go to the **Configuration** tab.
 3. Fill in the required fields:
    * **INVERTER_IP**: The local IP of your inverter (e.g., `192.168.1.139`).
@@ -57,7 +73,7 @@ The following sensors will automatically appear in Home Assistant:
 ---
 
 ## 🇺🇦 Українською (Ukrainian)
-Цей додаток дозволяє інтегрувати інвертори PowMr у Home Assistant без використання зовнішніх хмар. Він перехоплює трафік, що йде до хмари Siseli, та автоматично створює сенсори. Повна інструкція з налаштування доступна в розділі README вище (англійською).
+Цей додаток дозволяє інтегрувати інвертори, сумісні з Siseli Cloud, у Home Assistant без використання зовнішніх хмар (підтримуються бренди Solar of Things, LUMINOUS NEO, PowMr, Taico та інші). Він перехоплює трафік, що йде до хмари Siseli, та автоматично створює сенсори. Повна інструкція з налаштування доступна в розділі README вище (англійською).
 
 ---
 

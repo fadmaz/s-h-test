@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- PowMr Bridge 2.0.0 ---"
+echo "--- Siseli Inverter Bridge 2.5.0 ---"
 
 export MQTT_HOST="$(bashio::config 'MQTT_HOST' 'core-mosquitto')"
 export MQTT_PORT="$(bashio::config 'MQTT_PORT' '1883')"
@@ -18,10 +18,10 @@ export ROUTER_MAC="$(bashio::config 'ROUTER_MAC' '')"
 export AUTO_INTERCEPT="$(bashio::config 'AUTO_INTERCEPT' 'true')"
 
 export MQTT_DISCOVERY_PREFIX="$(bashio::config 'MQTT_DISCOVERY_PREFIX' 'homeassistant')"
-export DEVICE_ID="$(bashio::config 'DEVICE_ID' 'powmr_rwb1')"
-export DEVICE_NAME="$(bashio::config 'DEVICE_NAME' 'PowMr 6.2kW Inverter')"
-export STATE_TOPIC="$(bashio::config 'STATE_TOPIC' "powmr/$(bashio::config 'DEVICE_ID' 'powmr_rwb1')/state")"
-export AVAILABILITY_TOPIC="$(bashio::config 'AVAILABILITY_TOPIC' "powmr/$(bashio::config 'DEVICE_ID' 'powmr_rwb1')/availability")"
+export DEVICE_ID="$(bashio::config 'DEVICE_ID' 'siseli_inverter_1')"
+export DEVICE_NAME="$(bashio::config 'DEVICE_NAME' 'Siseli Inverter')"
+export STATE_TOPIC="$(bashio::config 'STATE_TOPIC' "siseli/$(bashio::config 'DEVICE_ID' 'siseli_inverter_1')/state")"
+export AVAILABILITY_TOPIC="$(bashio::config 'AVAILABILITY_TOPIC' "siseli/$(bashio::config 'DEVICE_ID' 'siseli_inverter_1')/availability")"
 export SNIFF_IFACE="$(bashio::config 'SNIFF_IFACE' '')"
 export LOG_VERBOSE="$(bashio::config 'LOG_VERBOSE' 'true')"
 
@@ -29,4 +29,4 @@ echo "[Config] INVERTER_IP=${INVERTER_IP} ROUTER_IP=${ROUTER_IP}"
 echo "[Config] TARGET=${TARGET_HOST}:${TARGET_PORT} MQTT=${MQTT_HOST}:${MQTT_PORT}"
 echo "[Config] AUTO_INTERCEPT=${AUTO_INTERCEPT}"
 
-exec python3 -u /app/powmr_bridge.py
+exec python3 -u /app/siseli_bridge.py
