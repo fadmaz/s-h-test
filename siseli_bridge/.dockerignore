@@ -1,0 +1,9 @@
+# Don't ship dev/test files into the production image
+.git/
+.gitignore
+__pycache__/
+*.pyc
+tests/
+sensor_mapping.md
+*.md
+!CHANGELOG.md

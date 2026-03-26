@@ -5,7 +5,8 @@ FROM $BUILD_FROM
 RUN apk add --no-cache python3 py3-pip iptables libpcap-dev dos2unix libcap iproute2
 
 # Install Python libraries with the flag for modern Alpine (PEP 668)
-RUN pip3 install --no-cache-dir --break-system-packages paho-mqtt scapy
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
 # Set working directory
 WORKDIR /app

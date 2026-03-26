@@ -1,11 +1,20 @@
 # pyre-ignore-all-errors
 import base64
+import json
 import re
 import time
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from .loggers import log_kv, log_payload_preview
-from .config import STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER, MAX_MQTT_PACKET, PRINTABLE_ASCII_RE, STRICT_NUM_RE, SLUG_RE
+from .loggers import log, log_kv, json_log, log_payload_preview
+from .config import (
+    STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER,
+    MAX_MQTT_PACKET, PRINTABLE_ASCII_RE, STRICT_NUM_RE, SLUG_RE,
+    LOG_VERBOSE, LOG_BLOCKS, LOG_STATE_DIFF, LOG_STATE_SNAPSHOT,
+    LOG_RAW_JSON, LOG_CLEAN_STATE, LOG_MQTT_TOPICS,
+    LOG_MQTT_PAYLOAD_PREVIEW, LOG_UNPARSED_PUBLISH, LOG_NULL_TARGETS,
+    UPDATE_INTERVAL_SEC, STATE_TOPIC, MQTT_RETAIN,
+)
 
 MQTT_PACKET_TYPES = {
     1: "CONNECT",
@@ -276,7 +285,15 @@ def sanitize_block_key(name: str) -> str:
     return slug
 
 
+def _get_mqtt_globals():
+    """Deferred import to break the parsers <-> mqtt circular dependency."""
+    from . import mqtt
+    return mqtt.SENSORS, mqtt.LAST_STATE, mqtt.DISCOVERY_PUBLISHED, mqtt.publish_sensor_discovery, mqtt.client, mqtt.PUBLISHED_SENSOR_KEYS
+
+
 def ensure_dynamic_debug_sensor(block_name: str) -> str:
+    from .sensors import sensor
+    SENSORS, LAST_STATE, DISCOVERY_PUBLISHED, publish_sensor_discovery, _, _ = _get_mqtt_globals()
     state_key = f"dbg_{sanitize_block_key(block_name)}_raw"
     if state_key not in SENSORS:
         SENSORS[state_key] = sensor(f"DEBUG {block_name} Raw", icon="mdi:bug-outline", entity_category="diagnostic", enabled_by_default=False)
@@ -861,6 +878,7 @@ class SolarParser:
                 state["dc_rectification_temperature_c"] = round(dc_rect_temp, 1)
 
         # Generic computed PV total
+        _, LAST_STATE, _, _, _, _ = _get_mqtt_globals()
         pv_total_w = 0
         have_pv_total = False
         for key in ("pv_w", "pv2_power_w"):
@@ -1153,8 +1171,9 @@ class SolarParser:
             state.update(SolarParser._parse_bms_capacity(vals))
 
         # Friendly derived values / compatibility helpers
-        charge_a = state.get("bat_charge_current", LAST_STATE.get("bat_charge_current"))
-        discharge_a = state.get("dischg_current", LAST_STATE.get("dischg_current"))
+        _, _LAST_STATE, _, _, _, _ = _get_mqtt_globals()
+        charge_a = state.get("bat_charge_current", _LAST_STATE.get("bat_charge_current"))
+        discharge_a = state.get("dischg_current", _LAST_STATE.get("dischg_current"))
         if isinstance(charge_a, (int, float)) and float(charge_a) > 0.01:
             state["battery_status"] = "Charge"
         elif isinstance(discharge_a, (int, float)) and float(discharge_a) > 0.01:
@@ -1181,7 +1200,7 @@ class SolarParser:
             state["bulk_v"] = state["return_to_mains_mode_voltage_v"]
         if state.get("mains_current_flow_direction") is not None:
             state["mains_flow_state"] = state["mains_current_flow_direction"]
-        if "battery_type" not in state and LAST_STATE.get("battery_type") is None and "Yavb" in parsed:
+        if "battery_type" not in state and _LAST_STATE.get("battery_type") is None and "Yavb" in parsed:
             state["battery_type"] = "LIA"
 
         return state
@@ -1266,6 +1285,8 @@ class SolarParser:
                         log_payload_preview("[UNPARSED PAYLOAD: EMPTY CLEAN STATE]", payload_bytes, topic=source_topic, block_names=sorted(blocks.keys()))
                     return False
 
+                SENSORS, LAST_STATE, DISCOVERY_PUBLISHED, publish_sensor_discovery, client, _PUB_KEYS = _get_mqtt_globals()
+
                 previous_state = dict(LAST_STATE)
                 changed_keys = []
                 changed_data = []
@@ -1283,6 +1304,16 @@ class SolarParser:
 
                 LAST_STATE.update(clean_state)
 
+                # Persist state cache to survive container restarts
+                try:
+                    import os
+                    STATE_CACHE_FILE = "/data/state.json"
+                    os.makedirs(os.path.dirname(STATE_CACHE_FILE), exist_ok=True)
+                    with open(STATE_CACHE_FILE, "w") as _sf:
+                        json.dump(dict(LAST_STATE), _sf)
+                except Exception:
+                    pass
+
                 unresolved_debug = []
                 if LOG_NULL_TARGETS:
                     for key in IMPORTANT_DEBUG_KEYS:
@@ -1297,7 +1328,7 @@ class SolarParser:
                 if DISCOVERY_PUBLISHED:
                     # Publish discovery for any late-bound raw block sensors.
                     for key in clean_state.keys():
-                        if key in SENSORS and key not in PUBLISHED_SENSOR_KEYS:
+                        if key in SENSORS and key not in _PUB_KEYS:
                             publish_sensor_discovery(key)
                     
                     global LAST_PUBLISH_TS

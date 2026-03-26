@@ -5,7 +5,6 @@ import signal
 import threading
 import time
 import warnings
-from datetime import datetime
 from typing import Optional
 
 from scapy.all import ARP, Ether, IP, Raw, TCP, UDP, AsyncSniffer, getmacbyip, sendp  # type: ignore
@@ -14,7 +13,7 @@ from .config import *
 from .loggers import log, log_kv, json_log, log_payload_preview, printable_text_preview, hex_preview
 from .sensors import SENSORS
 from .mqtt import client, start_mqtt, publish_discovery, LAST_STATE, DISCOVERY_PUBLISHED, RUNNING
-from .parsers import SolarParser, extract_publish_payload, append_stream_data, ensure_dynamic_debug_sensor
+from .parsers import SolarParser, extract_publish_payload, append_stream_data, ensure_dynamic_debug_sensor, mqtt_type_name, SEEN_MQTT_TOPICS
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)

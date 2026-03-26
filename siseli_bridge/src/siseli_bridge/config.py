@@ -1,4 +1,5 @@
 import os
+import re
 
 INVERTER_IP = os.getenv("INVERTER_IP", "192.168.1.139")
 ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")
@@ -70,8 +71,6 @@ else:
     LOG_NULL_TARGETS = os.getenv("LOG_NULL_TARGETS", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
-
-import re
 
 STRICT_NUM_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 PRINTABLE_ASCII_RE = re.compile(r"^[ -~]+$")

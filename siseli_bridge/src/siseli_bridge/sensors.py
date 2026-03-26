@@ -219,12 +219,4 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "mains_flow_state": sensor("Settings - Mains Flow State (legacy)", icon="mdi:swap-horizontal-bold", entity_category="diagnostic", enabled_by_default=False),
 }
 
-for i in range(1, 17):
-    SENSORS[f"cell_{i}_mv"] = sensor(
-        f"Battery Voltage {i}",
-        unit="mV",
-        state_class="measurement",
-        icon="mdi:battery-heart-variant",
-    )
-
 
