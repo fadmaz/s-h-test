@@ -1,6 +1,6 @@
-# pyre-ignore-all-errors
 import base64
 import json
+import os
 import re
 import time
 from datetime import datetime
@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .loggers import log, log_kv, json_log, log_payload_preview
 from .config import (
-    STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER,
+    STATE_CACHE_FILE, STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER,
     MAX_MQTT_PACKET, PRINTABLE_ASCII_RE, STRICT_NUM_RE, SLUG_RE,
     LOG_VERBOSE, LOG_BLOCKS, LOG_STATE_DIFF, LOG_STATE_SNAPSHOT,
     LOG_RAW_JSON, LOG_CLEAN_STATE, LOG_MQTT_TOPICS,
@@ -299,16 +299,9 @@ def _get_mqtt_globals():
     return mqtt.SENSORS, mqtt.LAST_STATE, mqtt.DISCOVERY_PUBLISHED, mqtt.publish_sensor_discovery, mqtt.client, mqtt.PUBLISHED_SENSOR_KEYS
 
 
-def ensure_dynamic_debug_sensor(block_name: str) -> str:
-    from .sensors import sensor
-    SENSORS, LAST_STATE, DISCOVERY_PUBLISHED, publish_sensor_discovery, _, _ = _get_mqtt_globals()
-    state_key = f"dbg_{sanitize_block_key(block_name)}_raw"
-    if state_key not in SENSORS:
-        SENSORS[state_key] = sensor(f"DEBUG {block_name} Raw", icon="mdi:bug-outline", entity_category="diagnostic", enabled_by_default=False)
-        LAST_STATE.setdefault(state_key, None)
-        if DISCOVERY_PUBLISHED:
-            publish_sensor_discovery(state_key)
-    return state_key
+def _log_debug_block(block_name: str, raw_text: str) -> None:
+    """Log raw debug block data instead of creating HA entities."""
+    log(f"[DEBUG BLOCK] {block_name}: {raw_text[:250]}")
 
 
 class SolarParser:
@@ -622,8 +615,7 @@ class SolarParser:
     @staticmethod
     def _apply_dynamic_debug(state: Dict[str, object], parsed: Dict[str, Tuple[str, List[str]]]) -> None:
         for block_name, (raw_text, _tokens) in parsed.items():
-            state_key = ensure_dynamic_debug_sensor(block_name)
-            state[state_key] = raw_text[:250]
+            _log_debug_block(block_name, raw_text)
 
     @staticmethod
     def _try_ascii_schema(blocks: Dict[str, bytes]) -> Dict[str, object]:
@@ -1314,8 +1306,6 @@ class SolarParser:
 
                 # Persist state cache to survive container restarts
                 try:
-                    import os
-                    STATE_CACHE_FILE = "/data/state.json"
                     os.makedirs(os.path.dirname(STATE_CACHE_FILE), exist_ok=True)
                     with open(STATE_CACHE_FILE, "w") as _sf:
                         json.dump(dict(LAST_STATE), _sf)

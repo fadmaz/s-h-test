@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.11] - 2026-03-26
+- Centralized `STATE_CACHE_FILE` in `config.py` for easier maintenance
+- Cleaned up top-level imports in `parsers.py` (moved `os`, `json` to module level)
+- Added `tests/test_sensors.py` automated validation suite for 220+ sensors
+- Removed dynamic debug entities from HA Diagnostics; moved to add-on log stream
+
 ## [2.5.10] - 2026-03-26
 - Added missing `mqtt_type_name()` function to `parsers.py`
 - Moved `LAST_PUBLISH_TS` to `parsers.py` (cross-module `global` fix)

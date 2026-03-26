@@ -1,5 +1,7 @@
-import os
 import re
+import os
+
+STATE_CACHE_FILE = "/data/state.json"
 
 INVERTER_IP = os.getenv("INVERTER_IP", "192.168.1.139")
 ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")

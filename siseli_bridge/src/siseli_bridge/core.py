@@ -13,7 +13,7 @@ from .config import *
 from .loggers import log, log_kv, json_log, log_payload_preview, printable_text_preview, hex_preview
 from .sensors import SENSORS
 from .mqtt import client, start_mqtt, publish_discovery, LAST_STATE, DISCOVERY_PUBLISHED, RUNNING
-from .parsers import SolarParser, extract_publish_payload, append_stream_data, ensure_dynamic_debug_sensor, mqtt_type_name, SEEN_MQTT_TOPICS
+from .parsers import SolarParser, extract_publish_payload, append_stream_data, mqtt_type_name, SEEN_MQTT_TOPICS
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -33,7 +33,7 @@ INV_MAC: Optional[str] = None
 RTR_MAC: Optional[str] = None
 sniffer: Optional[AsyncSniffer] = None
 
-STATE_CACHE_FILE = "/data/state.json"
+from .config import STATE_CACHE_FILE
     
 try:
     if os.path.exists(STATE_CACHE_FILE):
@@ -227,7 +227,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Siseli Inverter Bridge 2.5.10 ---")
+    log("--- Siseli Inverter Bridge 2.5.11 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
