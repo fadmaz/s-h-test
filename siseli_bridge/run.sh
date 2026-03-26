@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- Siseli Inverter Bridge 2.5.0 ---"
+echo "--- Siseli Inverter Bridge 2.5.8 ---"
 
 export MQTT_HOST="$(bashio::config 'MQTT_HOST' 'core-mosquitto')"
 export MQTT_PORT="$(bashio::config 'MQTT_PORT' '1883')"
@@ -33,4 +33,4 @@ echo "[Config] INVERTER_IP=${INVERTER_IP} ROUTER_IP=${ROUTER_IP}"
 echo "[Config] TARGET=${TARGET_HOST}:${TARGET_PORT} MQTT=${MQTT_HOST}:${MQTT_PORT}"
 echo "[Config] AUTO_INTERCEPT=${AUTO_INTERCEPT}"
 
-exec python3 -u /app/siseli_bridge.py
+exec python3 -u -m src.siseli_bridge.core
