@@ -45,7 +45,6 @@ except Exception as e:
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
 LAST_PACKET_TS = 0.0
-LAST_PUBLISH_TS = 0.0
 
 class ArpSpoofer:
     def resolve_macs(self) -> None:
@@ -228,7 +227,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
-    log("--- Siseli Inverter Bridge 2.5.9 ---")
+    log("--- Siseli Inverter Bridge 2.5.10 ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.10] - 2026-03-26
+- Added missing `mqtt_type_name()` function to `parsers.py`
+- Moved `LAST_PUBLISH_TS` to `parsers.py` (cross-module `global` fix)
+
 ## [2.5.9] - 2026-03-26
 - Fixed Dockerfile to use pinned `requirements.txt` instead of hardcoded packages
 - Fixed circular import crash between `parsers.py` and `mqtt.py` via deferred imports

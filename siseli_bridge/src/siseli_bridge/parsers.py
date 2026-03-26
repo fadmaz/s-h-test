@@ -34,6 +34,13 @@ MQTT_PACKET_TYPES = {
 }
 
 
+def mqtt_type_name(first_byte: int) -> str:
+    """Return a human-readable MQTT packet type from the first byte."""
+    ptype = (first_byte >> 4) & 0x0F
+    return MQTT_PACKET_TYPES.get(ptype, f"UNKNOWN({ptype})")
+
+
+
 class TcpFlowState:
     def __init__(self) -> None:
         self.next_seq: Optional[int] = None
@@ -52,6 +59,7 @@ FLOW_STATES: Dict[Tuple[str, int, str, int], TcpFlowState] = {}
 PUBLISHED_SENSOR_KEYS = set()
 SEEN_MQTT_TOPICS: Dict[str, int] = {}
 IMPORTANT_DEBUG_KEYS = ("bms_avg_temp_c", "mains_current_flow_direction")
+LAST_PUBLISH_TS: float = 0.0
 
 
 def decode_remaining_length(buf: bytes, start_index: int = 1) -> Tuple[Optional[int], Optional[int]]:
