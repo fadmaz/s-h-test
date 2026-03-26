@@ -206,6 +206,22 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bms_min_cell_pos": sensor("BMS Status - Min Voltage Cell Position", state_class="measurement", icon="mdi:numeric"),
     "bms_cell_count": sensor("BMS Status - BMS Cell Count", state_class="measurement", icon="mdi:battery-sync"),
     "bms_cell_delta_mv": sensor("BMS Status - BMS Cell Delta", unit="mV", state_class="measurement", icon="mdi:battery-sync"),
+    "cell_1_mv": sensor("BMS Status - Battery Voltage 1", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_2_mv": sensor("BMS Status - Battery Voltage 2", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_3_mv": sensor("BMS Status - Battery Voltage 3", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_4_mv": sensor("BMS Status - Battery Voltage 4", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_5_mv": sensor("BMS Status - Battery Voltage 5", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_6_mv": sensor("BMS Status - Battery Voltage 6", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_7_mv": sensor("BMS Status - Battery Voltage 7", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_8_mv": sensor("BMS Status - Battery Voltage 8", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_9_mv": sensor("BMS Status - Battery Voltage 9", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_10_mv": sensor("BMS Status - Battery Voltage 10", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_11_mv": sensor("BMS Status - Battery Voltage 11", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_12_mv": sensor("BMS Status - Battery Voltage 12", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_13_mv": sensor("BMS Status - Battery Voltage 13", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_14_mv": sensor("BMS Status - Battery Voltage 14", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_15_mv": sensor("BMS Status - Battery Voltage 15", unit="mV", state_class="measurement", icon="mdi:car-battery"),
+    "cell_16_mv": sensor("BMS Status - Battery Voltage 16", unit="mV", state_class="measurement", icon="mdi:car-battery"),
 
     # Grid page
     "grid_v": sensor("Grid Status - AC Input Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:transmission-tower"),
@@ -1753,11 +1769,13 @@ class SolarParser:
 
                 previous_state = dict(LAST_STATE)
                 changed_keys = []
+                changed_data = []
                 for key in sorted(clean_state.keys()):
                     old_val = previous_state.get(key, "__missing__")
                     new_val = clean_state[key]
                     if old_val != new_val:
                         changed_keys.append(key)
+                        changed_data.append(f"{key}={new_val}")
                         if LOG_STATE_DIFF:
                             log_kv("[STATE CHANGE]", key=key, old=None if old_val == "__missing__" else old_val, new=new_val)
 
@@ -1794,7 +1812,7 @@ class SolarParser:
                     topic=source_topic,
                     clean_value_count=len(clean_state),
                     changed_key_count=len(changed_keys),
-                    changed_keys=changed_keys,
+                    changed_values=changed_data,
                 )
                 return True
 
