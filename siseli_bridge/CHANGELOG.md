@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.5] - 2026-03-26
+### Fixed
+- Fixed a dictionary syntax error missing trailing commas in `siseli_bridge.py`.
+- Synchronized internal python logging script version string to automatically match the add-on's release metadata.
+
 ## [2.5.4] - 2026-03-26
 ### Changed
 - **Massive UI Decluttering**: Leveraged Home Assistant's `entity_category: diagnostic` feature to aggressively collapse all 60+ Advanced Hardware Settings and System Identity codes into a dedicated, minimized 'Diagnostic' card. The main 'Sensors' dashboard is now perfectly clean and only shows critical core metrics (Battery stats, Solar Wattage, etc.).
