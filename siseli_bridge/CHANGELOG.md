@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.13] - 2026-03-29
+
+### Changed
+
+- **Home Assistant Device Split**: MQTT discovery now groups entities into multiple logical devices (`Battery`, `BMS`, `Grid`, `Load`, `PV`, `Diagnostics`) instead of one overloaded device.
+- **Functional Diagnostics Routing**: Sensors from the app's "More" section are mapped by function (battery/grid/pv/load) when possible, with fallback to `Diagnostics`.
+- **Per-Group MQTT Topics**: Discovery `state_topic` and `availability_topic` are now section-specific, and runtime publishes are routed per sensor group.
+- **Shutdown Availability Handling**: Bridge shutdown now marks all grouped device availability topics offline.
+
+### Added
+
+- Added sensor grouping helpers in `sensors.py` and grouping validation tests in `tests/test_sensors.py`.
+
 ## [2.5.12] - 2026-03-29
 
 ### Added

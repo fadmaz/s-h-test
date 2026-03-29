@@ -5,7 +5,13 @@ import os
 # Add parent directory to path to allow importing src
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.siseli_bridge.sensors import SENSORS
+from src.siseli_bridge.sensors import (
+    SENSORS,
+    SENSOR_GROUP_TITLES,
+    get_group_title,
+    get_grouped_sensor_keys,
+    get_sensor_group,
+)
 
 class TestSensors(unittest.TestCase):
     def test_sensors_schema(self):
@@ -41,6 +47,33 @@ class TestSensors(unittest.TestCase):
         for key, config in SENSORS.items():
             category = config.get("entity_category")
             self.assertIn(category, valid_categories, f"Invalid entity_category '{category}' for sensor {key}")
+
+    def test_sensor_grouping_prefixes(self):
+        """Ensure primary app sections map to dedicated logical devices."""
+        self.assertEqual(get_sensor_group("bat_v"), "battery")
+        self.assertEqual(get_sensor_group("cell_1_mv"), "bms")
+        self.assertEqual(get_sensor_group("grid_v"), "grid")
+        self.assertEqual(get_sensor_group("out_v"), "load")
+        self.assertEqual(get_sensor_group("pv_v"), "pv")
+
+    def test_sensor_grouping_settings_split(self):
+        """Ensure diagnostics on the More page are functionally distributed."""
+        self.assertEqual(get_sensor_group("bms_avg_temp_c"), "battery")
+        self.assertEqual(get_sensor_group("grid_connection_sign"), "grid")
+        self.assertEqual(get_sensor_group("pv_energy_feeding_priority"), "pv")
+        self.assertEqual(get_sensor_group("parallel_mode"), "load")
+
+    def test_grouping_covers_all_sensors(self):
+        grouped = get_grouped_sensor_keys()
+        regrouped = set()
+        for keys in grouped.values():
+            regrouped.update(keys)
+        self.assertEqual(regrouped, set(SENSORS.keys()))
+
+    def test_group_titles(self):
+        for group in SENSOR_GROUP_TITLES:
+            self.assertEqual(get_group_title(group), SENSOR_GROUP_TITLES[group])
+        self.assertEqual(get_group_title("unknown-group"), "Diagnostics")
 
 if __name__ == '__main__':
     unittest.main()

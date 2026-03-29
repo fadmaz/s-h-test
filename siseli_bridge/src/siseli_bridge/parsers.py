@@ -15,7 +15,7 @@ from .config import (
     LOG_VERBOSE, LOG_BLOCKS, LOG_STATE_DIFF, LOG_STATE_SNAPSHOT,
     LOG_RAW_JSON, LOG_CLEAN_STATE, LOG_MQTT_TOPICS,
     LOG_MQTT_PAYLOAD_PREVIEW, LOG_UNPARSED_PUBLISH, LOG_NULL_TARGETS,
-    UPDATE_INTERVAL_SEC, STATE_TOPIC, MQTT_RETAIN,
+    UPDATE_INTERVAL_SEC,
 )
 
 MQTT_PACKET_TYPES = {
@@ -315,7 +315,7 @@ def sanitize_block_key(name: str) -> str:
 def _get_mqtt_publish():
     """Minimal deferred import — only for MQTT publish callables not available in state.py."""
     from . import mqtt
-    return mqtt.publish_sensor_discovery, mqtt.client
+    return mqtt.publish_sensor_discovery, mqtt.publish_grouped_state
 
 
 def _log_debug_block(block_name: str, raw_text: str) -> None:
@@ -1302,7 +1302,7 @@ class SolarParser:
                         log_payload_preview("[UNPARSED PAYLOAD: EMPTY CLEAN STATE]", payload_bytes, topic=source_topic, block_names=sorted(blocks.keys()))
                     return False
 
-                publish_sensor_discovery, client = _get_mqtt_publish()
+                publish_sensor_discovery, publish_grouped_state = _get_mqtt_publish()
 
                 previous_state = dict(_shared_state.LAST_STATE)
                 changed_keys = []
@@ -1349,7 +1349,7 @@ class SolarParser:
                     global LAST_PUBLISH_TS
                     now = time.time()
                     if len(changed_keys) > 0 or (now - LAST_PUBLISH_TS) >= UPDATE_INTERVAL_SEC:
-                        client.publish(STATE_TOPIC, json.dumps(_shared_state.LAST_STATE), retain=MQTT_RETAIN)
+                        publish_grouped_state(_shared_state.LAST_STATE)
                         LAST_PUBLISH_TS = now
 
                 log_kv(

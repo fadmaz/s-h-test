@@ -1,6 +1,6 @@
 # ☀️ Siseli Solar Cloud Home Assistant Bridge
 
-[![Version](https://img.shields.io/badge/version-2.5.12-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.5.13-blue.svg)](CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
 > **⚠️ WARNING:** Do not use this project for your own setup. This repository is purely a testing environment created to experiment with improvements before submitting them back to the original project at [yuraantonov11/siseli-ha](https://github.com/yuraantonov11/siseli-ha).
@@ -86,6 +86,17 @@ Create a static route on your router that redirects traffic for the target IP `8
 
 This bridge dynamically extracts and exposes **almost every single sensor and data point available in the official Siseli app** (100+ entities) directly into Home Assistant via MQTT Auto-Discovery.
 
+Sensors are now split across multiple Home Assistant devices instead of one large combined device:
+
+- **Battery**
+- **BMS**
+- **Grid**
+- **Load**
+- **PV**
+- **Diagnostics** (for non-functional or fallback settings)
+
+The "More" tab diagnostics are functionally routed where possible (battery-related settings to Battery, mains/grid settings to Grid, PV/solar settings to PV, output/parallel settings to Load).
+
 The exposed data includes:
 
 - **🔋 Battery & BMS Status**
@@ -124,6 +135,18 @@ _Note: It may work out-of-the-box on other Siseli-based devices listed in the Su
 - **Check MQTT Connection:** Ensure your Mosquitto broker is running and the add-on logs show a successful connection.
 - **Verify Inverter IP:** Double-check that `INVERTER_IP` and `ROUTER_IP` are exactly correct in the configuration.
 - **Disable AUTO_INTERCEPT:** If ARP spoofing is blocked by your router, set `AUTO_INTERCEPT` to `false` and try the **DNS Configuration** or **Static Route** methods instead.
+
+**After upgrading, I see duplicate/stale entities in Home Assistant**
+
+- Because the bridge now uses per-section device IDs, entity `unique_id` values changed.
+- Remove old retained discovery payloads from your broker, then restart the add-on so discovery is republished with the new grouped devices.
+- Example cleanup command:
+
+```bash
+mosquitto_pub -h core-mosquitto -t 'homeassistant/sensor/siseli_inverter_1/+/config' -n -r
+```
+
+- If your old `DEVICE_ID` was not `siseli_inverter_1`, replace it in that topic pattern.
 
 ---
 

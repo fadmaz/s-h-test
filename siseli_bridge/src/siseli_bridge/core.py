@@ -11,9 +11,9 @@ from scapy.all import ARP, Ether, IP, Raw, TCP, UDP, AsyncSniffer, getmacbyip, s
 
 from .config import *
 from .loggers import log, log_kv, json_log, log_payload_preview, printable_text_preview, hex_preview
-from .sensors import SENSORS
+from .sensors import SENSORS, get_grouped_sensor_keys
 from . import state as _state
-from .mqtt import client, start_mqtt, publish_discovery, RUNNING
+from .mqtt import client, start_mqtt, publish_discovery, RUNNING, availability_topic_for_group
 from .parsers import SolarParser, extract_publish_payload, append_stream_data, mqtt_type_name, SEEN_MQTT_TOPICS
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -214,7 +214,8 @@ def shutdown(*_args) -> None:
         pass
 
     try:
-        client.publish(AVAILABILITY_TOPIC, "offline", retain=True)
+        for group in get_grouped_sensor_keys():
+            client.publish(availability_topic_for_group(group), "offline", retain=True)
         client.disconnect()
         client.loop_stop()
     except Exception:
@@ -226,7 +227,7 @@ def shutdown(*_args) -> None:
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-VERSION = "2.5.12"  # Keep in sync with siseli_bridge/config.yaml
+VERSION = "2.5.13"  # Keep in sync with siseli_bridge/config.yaml
 
 
 if __name__ == "__main__":

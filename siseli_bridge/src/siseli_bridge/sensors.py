@@ -219,4 +219,94 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "mains_flow_state": sensor("Settings - Mains Flow State (legacy)", icon="mdi:swap-horizontal-bold", entity_category="diagnostic", enabled_by_default=False),
 }
 
+SENSOR_GROUP_TITLES: Dict[str, str] = {
+    "battery": "Battery",
+    "bms": "BMS",
+    "grid": "Grid",
+    "load": "Load",
+    "pv": "PV",
+    "diagnostics": "Diagnostics",
+}
+
+_BATTERY_HINTS = (
+    "battery",
+    "bms",
+    "charge",
+    "discharge",
+    "soc",
+    "cell",
+    "equalization",
+    "boost",
+)
+
+_GRID_HINTS = (
+    "grid",
+    "mains",
+    "utility",
+    "input",
+    "relay",
+    "ct_",
+)
+
+_PV_HINTS = (
+    "pv",
+    "solar",
+    "mppt",
+)
+
+_LOAD_HINTS = (
+    "output",
+    "load",
+    "inverter",
+    "parallel",
+)
+
+
+def _settings_group_for_key(key: str) -> str:
+    k = key.lower()
+    if any(token in k for token in _BATTERY_HINTS):
+        return "battery"
+    if any(token in k for token in _GRID_HINTS):
+        return "grid"
+    if any(token in k for token in _PV_HINTS):
+        return "pv"
+    if any(token in k for token in _LOAD_HINTS):
+        return "load"
+    return "diagnostics"
+
+
+def get_sensor_group(key: str) -> str:
+    meta = SENSORS.get(key)
+    if not meta:
+        return "diagnostics"
+
+    name = str(meta.get("name", ""))
+    if name.startswith("Battery Status - "):
+        return "battery"
+    if name.startswith("BMS Status - "):
+        return "bms"
+    if name.startswith("Grid Status - "):
+        return "grid"
+    if name.startswith("Load Status - "):
+        return "load"
+    if name.startswith("PV Panel Status - "):
+        return "pv"
+    if name.startswith("Settings - "):
+        return _settings_group_for_key(key)
+    return "diagnostics"
+
+
+def get_group_title(group: str) -> str:
+    return SENSOR_GROUP_TITLES.get(group, "Diagnostics")
+
+
+def get_grouped_sensor_keys() -> Dict[str, list]:
+    grouped: Dict[str, list] = {}
+    for key in SENSORS:
+        group = get_sensor_group(key)
+        grouped.setdefault(group, []).append(key)
+    for keys in grouped.values():
+        keys.sort()
+    return grouped
+
 
