@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- Siseli Inverter Bridge 2.5.12 ---"
+echo "--- Siseli Inverter Bridge 2.5.19 ---"
 
 export MQTT_HOST="$(bashio::config 'MQTT_HOST' 'core-mosquitto')"
 export MQTT_PORT="$(bashio::config 'MQTT_PORT' '1883')"
@@ -30,6 +30,9 @@ export ENTITY_PREFIX="$(bashio::config 'ENTITY_PREFIX' 'Siseli')"
 export LOG_LEVEL="$(bashio::config 'LOG_LEVEL' 'info')"
 export UPDATE_INTERVAL_SEC="$(bashio::config 'UPDATE_INTERVAL_SEC' '10')"
 export MQTT_RETAIN="$(bashio::config 'MQTT_RETAIN' 'true')"
+export INVERTER_COUNT="$(bashio::config 'INVERTER_COUNT' '1')"
+export BATTERY_COUNT="$(bashio::config 'BATTERY_COUNT' '1')"
+export BATTERY_CAPACITY_PER_BATTERY_AH="$(bashio::config 'BATTERY_CAPACITY_PER_BATTERY_AH' '0.0')"
 
 echo "[Config] INVERTER_IP=${INVERTER_IP} ROUTER_IP=${ROUTER_IP}"
 echo "[Config] TARGET=${TARGET_HOST}:${TARGET_PORT} MQTT=${MQTT_HOST}:${MQTT_PORT}"

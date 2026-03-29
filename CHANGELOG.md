@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.19] - 2026-03-29
+
+### Fixed
+
+- **Topology Config Export**: `run.sh` now exports `INVERTER_COUNT`, `BATTERY_COUNT`, and `BATTERY_CAPACITY_PER_BATTERY_AH` from add-on options so runtime no longer falls back to defaults.
+- **Startup Version Consistency**: Updated launcher banner to `2.5.19` to match add-on and runtime version metadata.
+
+### Changed
+
+- **Startup Diagnostics**: Added explicit startup logging for battery topology values (`BATTERY_COUNT` and `BATTERY_CAPACITY_PER_BATTERY_AH`).
+
 ## [2.5.18] - 2026-03-29
 
 ### Changed
