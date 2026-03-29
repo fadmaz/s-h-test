@@ -1232,12 +1232,6 @@ class SolarParser:
         if BATTERY_CAPACITY_PER_BATTERY_AH > 0:
             total_capacity = round(BATTERY_COUNT * BATTERY_CAPACITY_PER_BATTERY_AH, 1)
             state["c_bms_total_capacity_ah"] = total_capacity
-            soc = state.get("bms_current_soc", _shared_state.LAST_STATE.get("bms_current_soc"))
-            if isinstance(soc, (int, float)):
-                state["c_bms_remaining_capacity_ah"] = round(
-                    total_capacity * max(0.0, min(float(soc), 100.0)) / 100.0,
-                    1,
-                )
 
         return state
 

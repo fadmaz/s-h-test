@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.17] - 2026-03-29
+
+### Changed
+
+- **Startup Config Visibility**: Add-on startup logs now explicitly print `INVERTER_COUNT` so calculated `c_` power scaling configuration can be confirmed immediately in logs.
+
 ## [2.5.16] - 2026-03-29
 
 ### Changed
@@ -14,7 +20,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **Parallel Topology Config**: Added `INVERTER_COUNT`, `BATTERY_COUNT`, and `BATTERY_CAPACITY_PER_BATTERY_AH` options with startup validation and UI translations.
-- **Calculated Capacity Helpers**: Added `c_bms_total_capacity_ah` and `c_bms_remaining_capacity_ah` main sensors computed from battery config and BMS SOC.
+- **Calculated Capacity Helper**: Added `c_bms_total_capacity_ah` main sensor computed from battery configuration.
 
 ### Fixed
 

@@ -1,6 +1,6 @@
 # ☀️ Siseli Solar Cloud Home Assistant Bridge
 
-[![Version](https://img.shields.io/badge/version-2.5.16-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.5.17-blue.svg)](CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
 > **Acknowledgment:** This project is an expanded and generalized fork of the excellent work originally created at [yuraantonov11/siseli-ha](https://github.com/yuraantonov11/siseli-ha). Huge thanks to the original author!
@@ -79,7 +79,6 @@ This is applied to:
 For battery-bank visibility, the bridge also publishes calculated BMS capacity helper sensors on the Main device:
 
 - `c_bms_total_capacity_ah`
-- `c_bms_remaining_capacity_ah`
 
 All calculated sensors use the `c_` prefix so they are easy to distinguish from raw inverter values.
 

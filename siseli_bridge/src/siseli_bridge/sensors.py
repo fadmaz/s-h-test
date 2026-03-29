@@ -26,7 +26,6 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "battery_status": sensor("Battery Status - Battery Status", icon="mdi:battery-sync"),
     "battery_type": sensor("Battery Status - Battery Type", icon="mdi:battery-unknown"),
     "c_bms_total_capacity_ah": sensor("Battery Status - Calculated BMS Total Capacity", unit="Ah", state_class="measurement", icon="mdi:battery-high"),
-    "c_bms_remaining_capacity_ah": sensor("Battery Status - Calculated BMS Remaining Capacity", unit="Ah", state_class="measurement", icon="mdi:battery-medium"),
 
     # BMS page
     "bms_remaining_ah": sensor("BMS Status - Remaining Capacity", unit="Ah", icon="mdi:battery-medium"),
@@ -241,7 +240,6 @@ MAIN_SENSOR_KEYS = {
     "mode",
     "bms_current_soc",
     "c_bms_total_capacity_ah",
-    "c_bms_remaining_capacity_ah",
 }
 
 _BATTERY_HINTS = (

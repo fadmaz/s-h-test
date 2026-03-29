@@ -227,7 +227,7 @@ def shutdown(*_args) -> None:
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-VERSION = "2.5.16"  # Keep in sync with siseli_bridge/config.yaml
+VERSION = "2.5.17"  # Keep in sync with siseli_bridge/config.yaml
 
 
 if __name__ == "__main__":
@@ -237,6 +237,7 @@ if __name__ == "__main__":
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
     log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
+    log(f"[Config] INVERTER_COUNT={INVERTER_COUNT}")
     log(f"[Config] DEVICE_NAME={DEVICE_NAME} MANUFACTURER={MANUFACTURER}")
     log(f"[Config] STATE_TOPIC={STATE_TOPIC}")
     log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
