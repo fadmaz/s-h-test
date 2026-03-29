@@ -27,7 +27,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install paho-mqtt>=1.6,<2.0 scapy>=2.5,<2.7 pytest pytest-cov
+          pip install "paho-mqtt>=1.6,<2.0" "scapy>=2.5,<2.7" pytest pytest-cov
 
       - name: Run tests
         run: pytest siseli_bridge/tests --cov=siseli_bridge/src --cov-report=term-missing -v
