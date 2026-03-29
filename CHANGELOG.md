@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.18] - 2026-03-29
+
+### Changed
+
+- **Release Version Bump**: Updated project and add-on version metadata to `2.5.18` for this release.
+
 ## [2.5.17] - 2026-03-29
 
 ### Changed
