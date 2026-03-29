@@ -79,5 +79,13 @@ class TestSensors(unittest.TestCase):
         self.assertEqual(get_group_title("main"), "Main")
         self.assertEqual(get_group_title("unknown-group"), "Diagnostics")
 
+    def test_main_mode_and_soc_are_not_diagnostic(self):
+        self.assertNotIn("entity_category", SENSORS["mode"])
+        self.assertNotIn("entity_category", SENSORS["bms_current_soc"])
+
+    def test_debug_helpers_stay_hidden_by_default(self):
+        self.assertEqual(SENSORS["mains_eo8w_code"].get("entity_category"), "diagnostic")
+        self.assertFalse(SENSORS["mains_eo8w_code"].get("enabled_by_default", True))
+
 if __name__ == '__main__':
     unittest.main()

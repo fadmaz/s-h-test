@@ -38,6 +38,10 @@ options:
   MODEL_NAME: 'Siseli Inverter 1'
   MANUFACTURER: 'Siseli Compatible'
   ENTITY_PREFIX: 'Siseli'
+  INVERTER_COUNT: 1
+  INVERTER_POWER_MULTIPLIER: 1.0
+  BATTERY_COUNT: 1
+  BATTERY_CAPACITY_PER_BATTERY_AH: 0.0
 
   STATE_TOPIC: 'siseli/siseli_inverter_1/state'
   AVAILABILITY_TOPIC: 'siseli/siseli_inverter_1/availability'
@@ -69,6 +73,10 @@ schema:
   MODEL_NAME: str
   MANUFACTURER: str
   ENTITY_PREFIX: str?
+  INVERTER_COUNT: int(1,32)
+  INVERTER_POWER_MULTIPLIER: float(0,)
+  BATTERY_COUNT: int(1,64)
+  BATTERY_CAPACITY_PER_BATTERY_AH: float(0,)
 
   STATE_TOPIC: str
   AVAILABILITY_TOPIC: str

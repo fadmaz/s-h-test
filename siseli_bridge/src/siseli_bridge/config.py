@@ -26,6 +26,10 @@ DEVICE_NAME = os.getenv("DEVICE_NAME", "Siseli Inverter 1")
 MODEL_NAME = os.getenv("MODEL_NAME", DEVICE_NAME)
 MANUFACTURER = os.getenv("MANUFACTURER", "Siseli Compatible")
 ENTITY_PREFIX = os.getenv("ENTITY_PREFIX", "").strip()
+INVERTER_COUNT = int(os.getenv("INVERTER_COUNT", "1"))
+INVERTER_POWER_MULTIPLIER = float(os.getenv("INVERTER_POWER_MULTIPLIER", "1.0"))
+BATTERY_COUNT = int(os.getenv("BATTERY_COUNT", "1"))
+BATTERY_CAPACITY_PER_BATTERY_AH = float(os.getenv("BATTERY_CAPACITY_PER_BATTERY_AH", "0.0"))
 
 STATE_TOPIC = os.getenv("STATE_TOPIC", f"siseli/{DEVICE_ID}/state")
 AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"siseli/{DEVICE_ID}/availability")
@@ -112,6 +116,21 @@ def validate_config() -> None:
 
     if not TARGET_HOST.strip():
         errors.append("TARGET_HOST must not be empty")
+
+    if INVERTER_COUNT < 1:
+        errors.append(f"INVERTER_COUNT must be >= 1, got {INVERTER_COUNT}")
+    if INVERTER_POWER_MULTIPLIER <= 0:
+        errors.append(
+            "INVERTER_POWER_MULTIPLIER must be > 0, "
+            f"got {INVERTER_POWER_MULTIPLIER}"
+        )
+    if BATTERY_COUNT < 1:
+        errors.append(f"BATTERY_COUNT must be >= 1, got {BATTERY_COUNT}")
+    if BATTERY_CAPACITY_PER_BATTERY_AH < 0:
+        errors.append(
+            "BATTERY_CAPACITY_PER_BATTERY_AH must be >= 0, "
+            f"got {BATTERY_CAPACITY_PER_BATTERY_AH}"
+        )
 
     data_dir = os.path.dirname(STATE_CACHE_FILE)
     if data_dir:

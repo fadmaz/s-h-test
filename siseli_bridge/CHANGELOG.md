@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Main Device Sensor Layout**: `Mode` and `BMS Current SOC` are now published without diagnostic category so they appear in the Main `Sensors` card.
+- **Main Summary Scaling**: Main `Generation Power`, `Mains Power`, and `Output Active Power` now scale by `INVERTER_COUNT * INVERTER_POWER_MULTIPLIER` for parallel inverter setups.
+
+### Added
+
+- **Parallel Topology Config**: Added `INVERTER_COUNT`, `INVERTER_POWER_MULTIPLIER`, `BATTERY_COUNT`, and `BATTERY_CAPACITY_PER_BATTERY_AH` options with startup validation and UI translations.
+- **Configured Capacity Helpers**: Added Main helper sensors for configured inverter/battery topology and computed battery capacity totals.
+
 ### Fixed
 
 - **CI Dependency Install Quoting**: Quoted pip version specifiers in `.github/workflows/ci.yml` so bash does not interpret `<` as shell redirection during dependency installation.

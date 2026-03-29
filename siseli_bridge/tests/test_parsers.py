@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+from unittest import mock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.siseli_bridge.parsers import decode_remaining_length, extract_mqtt_packets_from_stream, validate_publish_packet, SolarParser
@@ -45,6 +46,12 @@ class TestParsers(unittest.TestCase):
         
         # Assert partial bytes were properly left intact in stream
         self.assertEqual(stream, bytearray(b'\x30\x06'))
+
+    def test_scale_main_power_uses_count_and_multiplier(self):
+        with mock.patch("src.siseli_bridge.parsers.INVERTER_COUNT", 3), mock.patch(
+            "src.siseli_bridge.parsers.INVERTER_POWER_MULTIPLIER", 1.5
+        ):
+            self.assertEqual(SolarParser._scale_main_power(100), 450)
 
 if __name__ == '__main__':
     unittest.main()

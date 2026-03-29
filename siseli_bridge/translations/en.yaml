@@ -1,76 +1,88 @@
 configuration:
   MQTT_HOST:
-    name: "MQTT Broker Host"
+    name: 'MQTT Broker Host'
     description: "The IP address of your MQTT Broker. Use 'core-mosquitto' if you are using the official Mosquitto add-on."
   MQTT_PORT:
-    name: "MQTT Broker Port"
-    description: "Usually 1883."
+    name: 'MQTT Broker Port'
+    description: 'Usually 1883.'
   MQTT_USER:
-    name: "MQTT Username"
-    description: "The username for your MQTT broker. Leave blank if not required."
+    name: 'MQTT Username'
+    description: 'The username for your MQTT broker. Leave blank if not required.'
   MQTT_PASSWORD:
-    name: "MQTT Password"
-    description: "The password for your MQTT broker."
+    name: 'MQTT Password'
+    description: 'The password for your MQTT broker.'
   INVERTER_IP:
-    name: "Inverter IP Address"
-    description: "The local IPv4 address of your Siseli-compatible inverter (e.g. 192.168.1.139)."
+    name: 'Inverter IP Address'
+    description: 'The local IPv4 address of your Siseli-compatible inverter (e.g. 192.168.1.139).'
   ROUTER_IP:
-    name: "Router IP Address"
-    description: "The local IPv4 address of your main internet router/gateway (e.g. 192.168.1.1)."
+    name: 'Router IP Address'
+    description: 'The local IPv4 address of your main internet router/gateway (e.g. 192.168.1.1).'
   AUTO_INTERCEPT:
-    name: "Auto-Intercept (ARP Spoofing)"
-    description: "Tricks the inverter into sending data to Home Assistant instead of the cloud. Required unless you configured a manual static route on your router."
+    name: 'Auto-Intercept (ARP Spoofing)'
+    description: 'Tricks the inverter into sending data to Home Assistant instead of the cloud. Required unless you configured a manual static route on your router.'
   TARGET_HOST:
-    name: "Target Cloud Host"
-    description: "The official Siseli cloud server. DO NOT CHANGE unless the cloud IP changes (default: 8.212.18.157)."
+    name: 'Target Cloud Host'
+    description: 'The official Siseli cloud server. DO NOT CHANGE unless the cloud IP changes (default: 8.212.18.157).'
   TARGET_PORT:
-    name: "Target Cloud Port"
-    description: "The MQTT port used by the Siseli cloud (default: 1883)."
+    name: 'Target Cloud Port'
+    description: 'The MQTT port used by the Siseli cloud (default: 1883).'
   LISTEN_PORT:
-    name: "Listen Port"
-    description: "The local TCP port to listen for incoming cloud connections (default: 18899). Normally does not need changing."
+    name: 'Listen Port'
+    description: 'The local TCP port to listen for incoming cloud connections (default: 18899). Normally does not need changing.'
   INVERTER_MAC:
-    name: "Inverter MAC Address"
-    description: "Optional. Manually specify the MAC address of your inverter (e.g. aa:bb:cc:dd:ee:ff). Leave blank for auto-detection."
+    name: 'Inverter MAC Address'
+    description: 'Optional. Manually specify the MAC address of your inverter (e.g. aa:bb:cc:dd:ee:ff). Leave blank for auto-detection.'
   ROUTER_MAC:
-    name: "Router MAC Address"
-    description: "Optional. Manually specify the MAC address of your router. Leave blank for auto-detection."
+    name: 'Router MAC Address'
+    description: 'Optional. Manually specify the MAC address of your router. Leave blank for auto-detection.'
   MQTT_DISCOVERY_PREFIX:
-    name: "MQTT Discovery Prefix"
+    name: 'MQTT Discovery Prefix'
     description: "The MQTT discovery prefix used by Home Assistant (default: 'homeassistant'). Only change if you have a custom setup."
   DEVICE_ID:
-    name: "Device ID"
-    description: "Unique identifier for this specific inverter in Home Assistant."
+    name: 'Device ID'
+    description: 'Unique identifier for this specific inverter in Home Assistant.'
   DEVICE_NAME:
-    name: "Device Name"
+    name: 'Device Name'
     description: "The human-readable name of your inverter shown in Home Assistant (e.g., 'Main Solar Inverter')."
   MODEL_NAME:
-    name: "Model Name"
-    description: "The hardware model of your inverter."
+    name: 'Model Name'
+    description: 'The hardware model of your inverter.'
   MANUFACTURER:
-    name: "Manufacturer"
-    description: "The manufacturer of your inverter (e.g., Luminous, PowMr, Taico)."
+    name: 'Manufacturer'
+    description: 'The manufacturer of your inverter (e.g., Luminous, PowMr, Taico).'
   ENTITY_PREFIX:
-    name: "Entity ID Prefix"
+    name: 'Entity ID Prefix'
     description: "The prefix attached to all individual sensors (e.g., 'Siseli'). Useful if running multiple instances side-by-side."
+  INVERTER_COUNT:
+    name: 'Inverter Count'
+    description: 'Number of inverters in your parallel setup. Main power summary sensors are multiplied by this count.'
+  INVERTER_POWER_MULTIPLIER:
+    name: 'Inverter Power Multiplier'
+    description: 'Extra multiplier applied on top of Inverter Count for Main power summary sensors (Generation, Mains, Output Active Power).'
+  BATTERY_COUNT:
+    name: 'Battery Count'
+    description: 'Number of batteries in the bank. Used to calculate configured total battery capacity.'
+  BATTERY_CAPACITY_PER_BATTERY_AH:
+    name: 'Battery Capacity Per Battery (Ah)'
+    description: 'Capacity of each battery in Ah. Set 0 to disable configured battery-capacity helper sensors.'
   STATE_TOPIC:
-    name: "MQTT State Topic"
-    description: "The root MQTT topic where all operational data is published."
+    name: 'MQTT State Topic'
+    description: 'The root MQTT topic where all operational data is published.'
   AVAILABILITY_TOPIC:
-    name: "MQTT Availability Topic"
+    name: 'MQTT Availability Topic'
     description: "The MQTT topic where the inverter's online/offline status is published."
   SNIFF_IFACE:
-    name: "Network Sniffer Interface"
+    name: 'Network Sniffer Interface'
     description: "Advanced: Specific network interface to intercept traffic on (e.g., 'eth0'). Leave blank for auto-detection."
   LOG_VERBOSE:
-    name: "Legacy Verbose Logging"
-    description: "Used by older scripts (deprecated). Use Log Level instead."
+    name: 'Legacy Verbose Logging'
+    description: 'Used by older scripts (deprecated). Use Log Level instead.'
   LOG_LEVEL:
-    name: "Logging Level"
+    name: 'Logging Level'
     description: "Controls the verbosity of the add-on logs. Set to 'warning' for quiet logs, or 'debug' for deep troubleshooting."
   UPDATE_INTERVAL_SEC:
-    name: "Update Throttling (Seconds)"
-    description: "Throttles how often data states are pushed to Home Assistant. Raising this will significantly save database storage (Default: 10 seconds)."
+    name: 'Update Throttling (Seconds)'
+    description: 'Throttles how often data states are pushed to Home Assistant. Raising this will significantly save database storage (Default: 10 seconds).'
   MQTT_RETAIN:
-    name: "MQTT Retain Flag"
-    description: "If enabled, Home Assistant will remember your real-time sensor states across reboots."
+    name: 'MQTT Retain Flag'
+    description: 'If enabled, Home Assistant will remember your real-time sensor states across reboots.'

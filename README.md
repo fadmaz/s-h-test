@@ -58,7 +58,34 @@ Ensure the official **Mosquitto Broker** add-on is installed and configured:
    - **INVERTER_IP**: The local IP of your inverter (e.g., `192.168.1.139`).
    - **ROUTER_IP**: The local IP of your router (e.g., `192.168.1.1`).
    - **AUTO_INTERCEPT**: Keep `true` to use ARP Spoofing (automatic interception).
+
+- Optional parallel-system fields:
+  - **INVERTER_COUNT**: Number of parallel inverters.
+  - **INVERTER_POWER_MULTIPLIER**: Extra tuning multiplier for main summary power.
+  - **BATTERY_COUNT**: Number of batteries in the bank.
+  - **BATTERY_CAPACITY_PER_BATTERY_AH**: Capacity per battery in Ah.
+
 4. Go to the **Info** tab, enable **Watchdog**, and click **Start**.
+
+### Parallel Inverter/Battery Scaling
+
+When using multiple inverters in parallel, main summary power sensors are scaled with:
+
+`scaled_power = raw_power * INVERTER_COUNT * INVERTER_POWER_MULTIPLIER`
+
+This is applied to:
+
+- `Generation Power`
+- `Mains Power`
+- `Output Active Power`
+
+For battery-bank visibility, the bridge now also publishes configured helper sensors on the Main device:
+
+- Configured inverter count and power multiplier
+- Configured battery count
+- Configured battery capacity per battery (Ah)
+- Total configured battery capacity (Ah)
+- Estimated remaining battery capacity (Ah) using BMS SOC
 
 ---
 

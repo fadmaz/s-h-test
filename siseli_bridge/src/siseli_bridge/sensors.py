@@ -10,7 +10,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     # Info / identity
     "model_code": sensor("Device Info - Device Type", icon="mdi:identifier", entity_category="diagnostic"),
     "output_model": sensor("Device Info - Output Model", icon="mdi:transmission-tower", entity_category="diagnostic"),
-    "mode": sensor("Device Info - Mode", icon="mdi:transmission-tower-export", entity_category="diagnostic"),
+    "mode": sensor("Device Info - Mode", icon="mdi:transmission-tower-export"),
     "status_code": sensor("Device Info - Status Code", icon="mdi:identifier", entity_category="diagnostic"),
     "firmware_info": sensor("Device Info - Firmware Info", icon="mdi:chip", entity_category="diagnostic"),
     "firmware_version": sensor("Device Info - Firmware Version", icon="mdi:chip", entity_category="diagnostic"),
@@ -25,6 +25,12 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bat_series_count": sensor("Battery Status - Battery Number In Series", state_class="measurement", icon="mdi:numeric"),
     "battery_status": sensor("Battery Status - Battery Status", icon="mdi:battery-sync"),
     "battery_type": sensor("Battery Status - Battery Type", icon="mdi:battery-unknown"),
+    "configured_inverter_count": sensor("Battery Status - Configured Inverter Count", state_class="measurement", icon="mdi:numeric"),
+    "configured_inverter_power_multiplier": sensor("Battery Status - Configured Inverter Power Multiplier", state_class="measurement", icon="mdi:multiplication"),
+    "configured_battery_count": sensor("Battery Status - Configured Battery Count", state_class="measurement", icon="mdi:battery-multiple"),
+    "battery_capacity_per_battery_ah": sensor("Battery Status - Configured Battery Capacity Per Battery", unit="Ah", state_class="measurement", icon="mdi:battery-outline"),
+    "total_battery_capacity_ah": sensor("Battery Status - Total Configured Battery Capacity", unit="Ah", state_class="measurement", icon="mdi:battery-high"),
+    "battery_remaining_capacity_ah": sensor("Battery Status - Estimated Remaining Battery Capacity", unit="Ah", state_class="measurement", icon="mdi:battery-medium"),
 
     # BMS page
     "bms_remaining_ah": sensor("BMS Status - Remaining Capacity", unit="Ah", icon="mdi:battery-medium"),
@@ -101,7 +107,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "bms_charging_overcurrent_sign": sensor("Settings - BMS Charging Overcurrent Sign", icon="mdi:alert", entity_category="diagnostic"),
     "bms_communication_control_function": sensor("Settings - BMS Communication Control Function", icon="mdi:lan-connect", entity_category="diagnostic"),
     "bms_communication_normal": sensor("Settings - BMS Communication Normal", icon="mdi:lan-check", entity_category="diagnostic"),
-    "bms_current_soc": sensor("Settings - BMS Current SOC", unit="%", state_class="measurement", icon="mdi:battery-high", entity_category="diagnostic"),
+    "bms_current_soc": sensor("Settings - BMS Current SOC", unit="%", state_class="measurement", icon="mdi:battery-high"),
     "bms_discharge_current_a": sensor("Settings - BMS Discharge Current", unit="A", device_class="current", state_class="measurement", icon="mdi:battery-minus", entity_category="diagnostic"),
     "bms_discharge_overcurrent_flag": sensor("Settings - BMS Discharge Overcurrent Flag", icon="mdi:alert", entity_category="diagnostic"),
     "bms_discharge_voltage_limit_v": sensor("Settings - BMS Discharge Voltage Limit", unit="V", device_class="voltage", state_class="measurement", icon="mdi:battery-arrow-down", entity_category="diagnostic"),
@@ -229,7 +235,19 @@ SENSOR_GROUP_TITLES: Dict[str, str] = {
     "diagnostics": "Diagnostics",
 }
 
-MAIN_SENSOR_KEYS = {"mains_power_w", "load_w", "generation_power_w", "mode", "bms_current_soc"}
+MAIN_SENSOR_KEYS = {
+    "mains_power_w",
+    "load_w",
+    "generation_power_w",
+    "mode",
+    "bms_current_soc",
+    "configured_inverter_count",
+    "configured_inverter_power_multiplier",
+    "configured_battery_count",
+    "battery_capacity_per_battery_ah",
+    "total_battery_capacity_ah",
+    "battery_remaining_capacity_ah",
+}
 
 _BATTERY_HINTS = (
     "battery",
