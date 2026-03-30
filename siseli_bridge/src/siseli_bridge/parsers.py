@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from . import state as _shared_state
-from .loggers import log, log_kv, json_log, log_payload_preview
+from .loggers import log, log_kv, json_log, log_payload_preview, log_error_always
 from .sensors import SENSORS
 from .config import (
     STATE_CACHE_FILE, STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER,
@@ -322,7 +322,7 @@ def _get_mqtt_publish():
 
 def _log_debug_block(block_name: str, raw_text: str) -> None:
     """Log raw debug block data instead of creating HA entities."""
-    log(f"[DEBUG BLOCK] {block_name}: {raw_text[:250]}")
+    log(f"[DEBUG BLOCK] {block_name}: {raw_text[:250]}", level="debug")
 
 
 class SolarParser:
@@ -1459,7 +1459,7 @@ class SolarParser:
                     with open(STATE_CACHE_FILE, "w") as _sf:
                         json.dump(dict(_shared_state.LAST_STATE), _sf)
                 except Exception as _cache_exc:
-                    log(f"[CACHE WRITE ERROR] {_cache_exc}")
+                    log(f"[CACHE WRITE ERROR] {_cache_exc}", level="error")
 
                 unresolved_debug = []
                 if LOG_NULL_TARGETS:
@@ -1486,6 +1486,7 @@ class SolarParser:
 
                 log_kv(
                     f"[{datetime.now().strftime('%H:%M:%S')}] Published to HA",
+                    level="info",
                     topic=source_topic,
                     clean_value_count=len(clean_state),
                     changed_key_count=len(changed_keys),
@@ -1498,7 +1499,7 @@ class SolarParser:
             return False
 
         except Exception as exc:
-            log(f"[PARSER ERROR] {exc}")
+            log_error_always(f"[PARSER ERROR] {exc}")
             if LOG_UNPARSED_PUBLISH:
                 log_payload_preview("[PARSER ERROR PAYLOAD]", payload_bytes, topic=source_topic, error=str(exc))
             return False

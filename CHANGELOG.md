@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.24] - 2026-03-30
+
+### Fixed
+
+- **Logging Level Enforcement**: Implemented level-aware logging so `LOG_LEVEL=error` suppresses routine informational/debug logs while preserving error output.
+- **Debug Block Noise**: Converted parser debug block output (`[DEBUG BLOCK]`) to debug-level logging so it no longer appears at warning/error levels.
+- **Severity Alignment**: Tagged runtime and MQTT lifecycle logs with explicit severities for consistent filtering behavior.
+
+### Added
+
+- **Logging Regression Tests**: Added `tests/test_logging.py` coverage for level filtering and always-on critical error logging behavior.
+
 ## [2.5.23] - 2026-03-30
 
 ### Fixed

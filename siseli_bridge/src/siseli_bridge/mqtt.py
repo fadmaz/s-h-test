@@ -137,7 +137,7 @@ def publish_discovery() -> None:
     for group in get_grouped_sensor_keys():
         client.publish(availability_topic_for_group(group), "online", retain=True)
     _state.DISCOVERY_PUBLISHED = True
-    log("[HA MQTT] Discovery published")
+    log("[HA MQTT] Discovery published", level="info")
 
 
 def publish_grouped_state(state_payload: Dict[str, object]) -> None:
@@ -153,18 +153,18 @@ def publish_grouped_state(state_payload: Dict[str, object]) -> None:
 def on_connect(_client, _userdata, _flags, rc, _properties=None):
     code = int(rc) if rc is not None else -1
     if code == 0:
-        log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}")
+        log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}", level="info")
         publish_discovery()
         if any(v is not None for v in _state.LAST_STATE.values()):
             publish_grouped_state(_state.LAST_STATE)
     else:
-        log(f"[HA MQTT ERROR] Connection failed with rc={code}")
+        log(f"[HA MQTT ERROR] Connection failed with rc={code}", level="error")
 
 
 def on_disconnect(_client, _userdata, rc, _properties=None):
     code = int(rc) if rc is not None else -1
     if code != 0 and RUNNING:
-        log(f"[HA MQTT] Disconnected (rc={code}), retrying...")
+        log(f"[HA MQTT] Disconnected (rc={code}), retrying...", level="warning")
 
 
 client.on_connect = on_connect
@@ -176,7 +176,7 @@ def start_mqtt() -> None:
         client.connect_async(MQTT_HOST, MQTT_PORT, 60)
         client.loop_start()
     except Exception as exc:
-        log(f"[HA MQTT ERROR] {exc}")
+        log(f"[HA MQTT ERROR] {exc}", level="error")
 
 
 

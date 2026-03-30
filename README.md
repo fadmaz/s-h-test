@@ -1,6 +1,6 @@
 # ☀️ Siseli Solar Cloud Home Assistant Bridge
 
-[![Version](https://img.shields.io/badge/version-2.5.23-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.5.24-blue.svg)](CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
 > **Acknowledgment:** This project is an expanded and generalized fork of the excellent work originally created at [yuraantonov11/siseli-ha](https://github.com/yuraantonov11/siseli-ha). Huge thanks to the original author!
@@ -11,14 +11,13 @@ Unleash your Siseli-compatible inverter into Home Assistant — **100% locally a
 
 ---
 
-## ✨ What is New (2.5.23)
+## ✨ What is New (2.5.24)
 
-- Improved app-value parity for key diagnostics:
-  - `bms_avg_temp_c` parsing support from extended Yavb payloads
-  - `charging_light_status` default alignment (`Flicker`)
-  - `output_set_frequency` app-style display normalization (`49.9` -> `50`)
-  - `software_version` display normalization (`0010.11` -> `10.11`)
-- Improved project documentation and release notes.
+- Logging behavior fix:
+  - `LOG_LEVEL=error` now suppresses routine informational/debug output
+  - parser block debug spam (`[DEBUG BLOCK]`) is now filtered by log level
+  - startup/MQTT/runtime logs now use explicit severity levels
+- Added regression tests for level-aware logging behavior.
 
 ## 📘 Add-on Page Documentation
 

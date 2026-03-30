@@ -41,7 +41,7 @@ try:
         with open(STATE_CACHE_FILE, "r") as f:
             _state.LAST_STATE.update(json.load(f))
 except Exception as e:
-    log(f"[CACHE] Error loading state: {e}")
+    log(f"[CACHE] Error loading state: {e}", level="error")
 
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
@@ -61,26 +61,26 @@ class ArpSpoofer:
                 RTR_MAC = norm_mac(getmacbyip(ROUTER_IP))
 
             if not INV_MAC or not RTR_MAC:
-                log("[ARP] Waiting for MAC addresses...")
+                log("[ARP] Waiting for MAC addresses...", level="info")
                 time.sleep(2)
 
         if RUNNING:
-            log(f"[ARP] Inverter MAC: {INV_MAC}")
-            log(f"[ARP] Router MAC:   {RTR_MAC}")
+            log(f"[ARP] Inverter MAC: {INV_MAC}", level="info")
+            log(f"[ARP] Router MAC:   {RTR_MAC}", level="info")
 
     def run(self) -> None:
         self.resolve_macs()
         if not RUNNING:
             return
 
-        log(f"[ARP] Interception ACTIVE: {INVERTER_IP} <-> {ROUTER_IP}")
+        log(f"[ARP] Interception ACTIVE: {INVERTER_IP} <-> {ROUTER_IP}", level="info")
 
         while RUNNING:
             try:
                 send_layer2(Ether(dst=INV_MAC) / ARP(op=2, pdst=INVERTER_IP, psrc=ROUTER_IP, hwdst=INV_MAC), SNIFF_IFACE)
                 send_layer2(Ether(dst=RTR_MAC) / ARP(op=2, pdst=ROUTER_IP, psrc=INVERTER_IP, hwdst=RTR_MAC), SNIFF_IFACE)
             except Exception as exc:
-                log(f"[ARP ERROR] {exc}")
+                log(f"[ARP ERROR] {exc}", level="error")
 
             time.sleep(2)
 
@@ -165,14 +165,14 @@ def packet_callback(pkt) -> None:
             try:
                 handle_inverter_tcp_packet(pkt)
             except Exception as exc:
-                log(f"[TCP PARSE ERROR] {exc}")
+                log(f"[TCP PARSE ERROR] {exc}", level="error")
 
             if AUTO_INTERCEPT and RTR_MAC:
                 try:
                     fwd_pkt = Ether(dst=RTR_MAC) / pkt[IP]
                     send_layer2(fwd_pkt, SNIFF_IFACE)
                 except Exception as exc:
-                    log(f"[FWD ERROR] inverter->router {exc}")
+                    log(f"[FWD ERROR] inverter->router {exc}", level="error")
         return
 
     if dst_ip == INVERTER_IP:
@@ -184,7 +184,7 @@ def packet_callback(pkt) -> None:
                 fwd_pkt = Ether(dst=INV_MAC) / pkt[IP]
                 send_layer2(fwd_pkt, SNIFF_IFACE)
             except Exception as exc:
-                log(f"[FWD ERROR] router->inverter {exc}")
+                log(f"[FWD ERROR] router->inverter {exc}", level="error")
 
 
 def health_logger() -> None:
@@ -192,11 +192,14 @@ def health_logger() -> None:
         time.sleep(30)
         age = time.time() - LAST_PACKET_TS if LAST_PACKET_TS else -1
         if age < 0:
-            log("[HEALTH] No packets captured yet")
+            log("[HEALTH] No packets captured yet", level="info")
         else:
             inv_list = sorted(x for x in KNOWN_INVERTER_MACS if x)
             rtr_list = sorted(x for x in KNOWN_ROUTER_MACS if x)
-            log(f"[HEALTH] Last packet seen {int(age)}s ago; inverter_macs={inv_list}; router_macs={rtr_list}")
+            log(
+                f"[HEALTH] Last packet seen {int(age)}s ago; inverter_macs={inv_list}; router_macs={rtr_list}",
+                level="info",
+            )
 
 
 def shutdown(*_args) -> None:
@@ -227,7 +230,7 @@ def shutdown(*_args) -> None:
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-VERSION = "2.5.23"  # Keep in sync with siseli_bridge/config.yaml
+VERSION = "2.5.24"  # Keep in sync with siseli_bridge/config.yaml
 
 
 if __name__ == "__main__":
@@ -271,7 +274,7 @@ if __name__ == "__main__":
 
     sniffer = AsyncSniffer(**sniff_kwargs)
     sniffer.start()
-    log("[Bridge] Sniffer started")
+    log("[Bridge] Sniffer started", level="info")
 
     try:
         while RUNNING:
