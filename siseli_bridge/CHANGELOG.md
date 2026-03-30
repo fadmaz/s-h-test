@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.23] - 2026-03-30
+
+### Fixed
+
+- **App Parity (BMS Temp)**: Added guarded parsing for `bms_avg_temp_c` from extended `Yavb` payloads to reduce `null` values when the inverter provides the field.
+- **App Parity (Charging Light)**: Updated preset fallback for `charging_light_status` from `Light` to `Flicker` to match observed app behavior.
+- **App Parity (Output Set Frequency)**: Normalized `output_set_frequency` display to app-style integer setpoint representation (example: `49.9` -> `50`).
+- **App Parity (Software Version)**: Normalized `software_version` display format (example: `0010.11` -> `10.11`) while preserving raw firmware token in `firmware_version`.
+
+### Changed
+
+- **README Refresh**: Expanded README with a "What is New" section and clearer add-on usage notes.
+- **Add-on Info Documentation Link**: Added add-on `url` metadata so the Home Assistant add-on page points directly to the project README.
+
 ## [2.5.22] - 2026-03-30
 
 ### Changed

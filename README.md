@@ -1,6 +1,6 @@
 # ☀️ Siseli Solar Cloud Home Assistant Bridge
 
-[![Version](https://img.shields.io/badge/version-2.5.22-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.5.23-blue.svg)](CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
 > **Acknowledgment:** This project is an expanded and generalized fork of the excellent work originally created at [yuraantonov11/siseli-ha](https://github.com/yuraantonov11/siseli-ha). Huge thanks to the original author!
@@ -8,6 +8,27 @@
 Unleash your Siseli-compatible inverter into Home Assistant — **100% locally and instantly** — without relying on external clouds for HA data. The bridge intercepts MQTT traffic to the Siseli Cloud, decodes it locally, and creates sensors via MQTT Auto-Discovery.
 
 > **🔒 Privacy Note:** Your Home Assistant instance intercepts the data for local use, but it simultaneously transparently forwards the traffic to the Siseli Cloud. This ensures your official mobile app continues to work flawlessly.
+
+---
+
+## ✨ What is New (2.5.23)
+
+- Improved app-value parity for key diagnostics:
+  - `bms_avg_temp_c` parsing support from extended Yavb payloads
+  - `charging_light_status` default alignment (`Flicker`)
+  - `output_set_frequency` app-style display normalization (`49.9` -> `50`)
+  - `software_version` display normalization (`0010.11` -> `10.11`)
+- Improved project documentation and release notes.
+
+## 📘 Add-on Page Documentation
+
+The add-on **Info** page in Home Assistant can show a "Visit ... page" link. This repository now points that link directly to this README.
+
+If you do not see the updated link yet:
+
+1. Open **Settings -> Add-ons -> Siseli Inverter Bridge**.
+2. Click **Rebuild**.
+3. Refresh the add-on page.
 
 ---
 
