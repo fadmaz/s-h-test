@@ -338,6 +338,24 @@ class SolarParser:
         return None
 
     @staticmethod
+    def _format_version_display(raw_version: str) -> str:
+        version = raw_version.strip()
+        if not version:
+            return version
+
+        if "." in version:
+            head, tail = version.split(".", 1)
+            if head.isdigit():
+                head = str(int(head))
+            else:
+                head = head.lstrip("0") or "0"
+            return f"{head}.{tail}"
+
+        if version.isdigit():
+            return str(int(version))
+        return version.lstrip("0") or "0"
+
+    @staticmethod
     def _power_to_kwh_delta(power_w: float, dt_seconds: float) -> float:
         if power_w <= 0 or dt_seconds <= 0:
             return 0.0
@@ -753,7 +771,7 @@ class SolarParser:
             state["firmware_info"] = raw_fw
             if len(fw_tokens) >= 1:
                 state["firmware_version"] = fw_tokens[0]
-                state["software_version"] = fw_tokens[0]
+                state["software_version"] = SolarParser._format_version_display(fw_tokens[0])
             if len(fw_tokens) >= 2:
                 state["firmware_build_date"] = SolarParser._format_fw_date(fw_tokens[1])
             if len(fw_tokens) >= 3:
@@ -768,7 +786,7 @@ class SolarParser:
                 state["out_v"] = round(out_v, 1)
             if out_hz is not None:
                 state["out_hz"] = round(out_hz, 1)
-                state["output_set_frequency"] = round(out_hz, 1)
+                state["output_set_frequency"] = int(round(out_hz))
 
         if len(vals) >= 4:
             out_va = SolarParser._to_int(vals[2])
@@ -1165,7 +1183,7 @@ class SolarParser:
             state.setdefault("pv_energy_feeding_priority", "LBU")
             state.setdefault("pv_grid_connection_agreement", "3")
             state.setdefault("charging_main_switch", "Open")
-            state.setdefault("charging_light_status", "Light")
+            state.setdefault("charging_light_status", "Flicker")
             state.setdefault("inverter_light_status", "Light")
             state.setdefault("warning_light_status", "Off")
             state.setdefault("lcd_back_lighting", "On")
@@ -1222,6 +1240,10 @@ class SolarParser:
             state["yavb_code_raw"] = vals[8]
         if len(vals) >= 10:
             state["yavb_aux_raw"] = vals[9]
+        if len(vals) >= 11:
+            bms_avg_temp = SolarParser._to_float(vals[10])
+            if bms_avg_temp is not None and -50.0 <= bms_avg_temp <= 150.0:
+                state["bms_avg_temp_c"] = round(bms_avg_temp, 2)
 
         flags_raw = state.get("yavb_flags_raw")
         if flags_raw == "1001100000000000":
@@ -1253,7 +1275,7 @@ class SolarParser:
 
         if state.get("eo8w_flags_raw") == "B0100000000000" and state.get("eo8w_blob_raw") == "20211002110B117020000":
             state.setdefault("charging_main_switch", "Open")
-            state.setdefault("charging_light_status", "Light")
+            state.setdefault("charging_light_status", "Flicker")
             state.setdefault("inverter_light_status", "Light")
             state.setdefault("warning_light_status", "Off")
             state.setdefault("automatic_return_to_first_page", "On")

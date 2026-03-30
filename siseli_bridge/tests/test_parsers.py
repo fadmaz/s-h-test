@@ -62,6 +62,55 @@ class TestParsers(unittest.TestCase):
         with mock.patch("src.siseli_bridge.parsers.INVERTER_COUNT", 3):
             self.assertEqual(SolarParser._scale_main_power(100), 300)
 
+    def test_ascii_schema_normalizes_software_version(self):
+        state = SolarParser._try_ascii_schema({
+            "hR6Y": b"(0010.11 20250630 14)"
+        })
+
+        self.assertEqual(state["firmware_version"], "0010.11")
+        self.assertEqual(state["software_version"], "10.11")
+
+    def test_ascii_schema_rounds_output_set_frequency_to_app_style(self):
+        state = SolarParser._try_ascii_schema({
+            "2l0E": b"(229.8 49.9 252 129 2 24 11000 006.1 0044)"
+        })
+
+        self.assertEqual(state["out_hz"], 49.9)
+        self.assertEqual(state["output_set_frequency"], 50)
+
+    def test_ascii_schema_93vq_preset_sets_charging_light_to_flicker(self):
+        state = SolarParser._try_ascii_schema({
+            "93VQ": b"(1 050 010 13310110230 011 1 1 0 1 1 015 035 050 025 056.4 056.4 042.0 020 0 0)"
+        })
+
+        self.assertEqual(state["charging_light_status"], "Flicker")
+        self.assertEqual(state["mains_light_status"], "Flicker")
+
+    def test_ascii_schema_eo8w_preset_sets_charging_light_to_flicker(self):
+        state = SolarParser._try_ascii_schema({
+            "eo8w": b"(00 B0100000000000 20211002110B117020000)"
+        })
+
+        self.assertEqual(state["charging_light_status"], "Flicker")
+        self.assertEqual(state["mains_light_status"], "Flicker")
+
+    def test_ascii_schema_parses_bms_average_temperature_from_yavb_tail(self):
+        state = SolarParser._try_ascii_schema({
+            "Yavb": b"(04 1001100000000000 042.0 057.6 195.0 054 0022.3 0000.0 02921 000000 18.95)"
+        })
+
+        self.assertEqual(state["bms_current_soc"], 54)
+        self.assertEqual(state["bms_charging_current_a"], 22.3)
+        self.assertEqual(state["bms_discharge_current_a"], 0.0)
+        self.assertEqual(state["bms_avg_temp_c"], 18.95)
+
+    def test_ascii_schema_yavb_without_tail_keeps_bms_average_temperature_absent(self):
+        state = SolarParser._try_ascii_schema({
+            "Yavb": b"(04 1001100000000000 042.0 057.6 195.0 054 0022.3 0000.0 02921 000000)"
+        })
+
+        self.assertNotIn("bms_avg_temp_c", state)
+
     def test_energy_dashboard_calculations_use_bms_currents_and_scale(self):
         shared_state.LAST_STATE.clear()
         shared_state.LAST_STATE.update({
