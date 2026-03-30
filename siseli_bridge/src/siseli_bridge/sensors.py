@@ -240,12 +240,8 @@ SENSOR_GROUP_TITLES: Dict[str, str] = {
 }
 
 MAIN_SENSOR_KEYS = {
-    "c_mains_power_w",
-    "c_load_w",
-    "c_generation_power_w",
     "mode",
     "bms_current_soc",
-    "c_bms_total_capacity_ah",
 }
 
 _BATTERY_HINTS = (
@@ -296,6 +292,8 @@ def _settings_group_for_key(key: str) -> str:
 
 
 def get_sensor_group(key: str) -> str:
+    if key.startswith("c_"):
+        return "main"
     if key in MAIN_SENSOR_KEYS:
         return "main"
     meta = SENSORS.get(key)

@@ -114,12 +114,11 @@ class TestSensors(unittest.TestCase):
         self.assertEqual(SENSORS["c_grid_import_energy_kwh"].get("unit"), "kWh")
 
     def test_energy_dashboard_calculated_sensors_grouping(self):
-        self.assertEqual(get_sensor_group("c_battery_charge_power_w"), "battery")
-        self.assertEqual(get_sensor_group("c_battery_discharge_power_w"), "battery")
-        self.assertEqual(get_sensor_group("c_battery_charge_energy_kwh"), "battery")
-        self.assertEqual(get_sensor_group("c_battery_discharge_energy_kwh"), "battery")
-        self.assertEqual(get_sensor_group("c_grid_import_power_w"), "grid")
-        self.assertEqual(get_sensor_group("c_grid_import_energy_kwh"), "grid")
+        calculated_keys = [key for key in SENSORS.keys() if key.startswith("c_")]
+        self.assertTrue(calculated_keys)
+        for key in calculated_keys:
+            with self.subTest(key=key):
+                self.assertEqual(get_sensor_group(key), "main")
 
 if __name__ == '__main__':
     unittest.main()

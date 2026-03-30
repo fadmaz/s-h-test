@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.21] - 2026-03-30
+
+### Changed
+
+- **Calculated Sensor Device Routing**: All calculated sensors (`c_*`) are now grouped under the Main logical device.
+- **Grouping Rule Simplification**: Main grouping now uses a prefix rule (`c_`) for calculated sensors, reducing manual key maintenance.
+
+### Fixed
+
+- **Grouping Consistency Tests**: Updated grouping tests to enforce that all calculated sensors resolve to Main.
+
 ## [2.5.20] - 2026-03-29
 
 ### Added
