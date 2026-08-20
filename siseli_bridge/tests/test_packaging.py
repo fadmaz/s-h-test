@@ -142,21 +142,27 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertIn('packages = ["src", "src.siseli_bridge"]', text)
 
 
-class TestRemovedOptions(unittest.TestCase):
+class TestDeprecatedOptions(unittest.TestCase):
     """LISTEN_PORT was exported, validated and described in the UI as the port the
     add-on listens on. Nothing ever bound a socket -- its only consumer was a startup
-    log line."""
+    log line.
+
+    It is nevertheless kept in the schema. Supervisor validates the *stored* options
+    before installing an update, so deleting a key that existing installations still
+    have on disk blocks the upgrade for all of them. It is removed in 2.7.0, by which
+    point stored copies have been rewritten.
+    """
 
     def setUp(self):
         self.cfg = _load_yaml(ADDON / "config.yaml")
-        self.run_sh = (ADDON / "run.sh").read_text(encoding="utf-8")
         self.config_py = CONFIG_PY.read_text(encoding="utf-8")
 
-    def test_listen_port_is_gone_everywhere(self):
-        self.assertNotIn("LISTEN_PORT", self.cfg["schema"])
-        self.assertNotIn("LISTEN_PORT", self.cfg["options"])
-        self.assertNotIn("LISTEN_PORT", self.run_sh)
-        self.assertNotIn("LISTEN_PORT", self.config_py)
+    def test_listen_port_is_retained_but_optional(self):
+        self.assertTrue(str(self.cfg["schema"]["LISTEN_PORT"]).endswith("?"))
+
+    def test_listen_port_is_read_only_to_warn(self):
+        self.assertIn("LISTEN_PORT_DEPRECATED", self.config_py)
+        self.assertNotIn("LISTEN_PORT,", self.config_py)  # not in the port-range checks
 
     def test_nothing_claims_to_listen_on_a_socket(self):
         src_dir = ADDON / "src"
@@ -183,6 +189,128 @@ class TestDebugFlagWiring(unittest.TestCase):
         """It shipped as true, so a fresh install wrote a line per captured frame."""
         self.assertIs(self.cfg["options"]["LOG_VERBOSE"], False)
         self.assertEqual(self.cfg["options"]["DEBUG_FLAGS"], [])
+
+
+def _validates(value, declaration):
+    """Approximate Home Assistant's add-on option validation.
+
+    Only the declaration forms this add-on uses are handled. The rule that matters and
+    is easy to get wrong: a trailing `?` means the option may be *absent*, not that an
+    empty string is acceptable. An empty string is a present value and must satisfy the
+    declaration on its own.
+    """
+    if isinstance(declaration, list):
+        if not isinstance(value, list):
+            return False
+        inner = re.match(r"list\((.+)\)$", declaration[0])
+        allowed = set(inner.group(1).split("|")) if inner else set()
+        return all(item in allowed for item in value)
+
+    declaration = str(declaration)
+    if declaration.endswith("?"):
+        declaration = declaration[:-1]
+        if value is None:
+            return True
+
+    if declaration == "bool":
+        return isinstance(value, bool)
+    if declaration == "str" or declaration == "password":
+        return isinstance(value, str)
+    if declaration.startswith("list("):
+        allowed = set(declaration[len("list(") : -1].split("|"))
+        return value in allowed
+    if declaration.startswith("match("):
+        pattern = declaration[len("match(") : -1]
+        return isinstance(value, str) and re.match(pattern, value) is not None
+    if declaration.startswith("float"):
+        return isinstance(value, (int, float))
+    if declaration.startswith("int"):
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False
+        bounds = re.match(r"int\((-?\d*),(-?\d*)\)$", declaration)
+        if bounds:
+            low, high = bounds.groups()
+            if low and value < int(low):
+                return False
+            if high and value > int(high):
+                return False
+        return True
+    raise AssertionError(f"unhandled schema declaration: {declaration!r}")
+
+
+class TestShippedDefaultsSatisfyTheSchema(unittest.TestCase):
+    """Home Assistant validates the *stored* options against the schema before it will
+    install an update. A default that its own schema rejects therefore blocks the
+    upgrade for every existing installation, with an error that names the schema rather
+    than the option -- which is exactly what happened when a MAC address pattern was
+    added to two options that both default to an empty string.
+    """
+
+    def setUp(self):
+        self.cfg = _load_yaml(ADDON / "config.yaml")
+
+    def test_every_default_satisfies_its_own_declaration(self):
+        for key, declaration in sorted(self.cfg["schema"].items()):
+            with self.subTest(option=key):
+                self.assertIn(key, self.cfg["options"], "option has a schema but no default")
+                value = self.cfg["options"][key]
+                self.assertTrue(
+                    _validates(value, declaration),
+                    f"the shipped default {value!r} does not satisfy {declaration!r}",
+                )
+
+    def test_an_optional_pattern_still_accepts_an_empty_string(self):
+        """`?` marks the option optional; it does not exempt an empty string from the
+        pattern. Any pattern on an option that can be left blank has to allow it."""
+        for key in ("INVERTER_MAC", "ROUTER_MAC"):
+            with self.subTest(option=key):
+                declaration = self.cfg["schema"][key]
+                self.assertTrue(_validates("", declaration), "a blank value must be accepted")
+                self.assertTrue(_validates("74-E9-D8-A3-41-2A", declaration))
+                self.assertTrue(_validates("aa:bb:cc:dd:ee:ff", declaration))
+                self.assertFalse(_validates("not-a-mac", declaration))
+
+    def test_a_previously_valid_stored_configuration_still_installs(self):
+        """A real configuration from a running installation, as Supervisor would
+        present it on upgrade. Every key it carries must still validate."""
+        stored = {
+            "MQTT_HOST": "192.168.0.134",
+            "MQTT_PORT": 1883,
+            "MQTT_USER": "frigate",
+            "MQTT_PASSWORD": "frigate",
+            "TARGET_HOST": "8.212.18.157",
+            "TARGET_PORT": 1883,
+            "LISTEN_PORT": 18899,
+            "INVERTER_IP": "192.168.0.152",
+            "ROUTER_IP": "192.168.0.1",
+            "INVERTER_MAC": "74-E9-D8-A3-41-2A",
+            "ROUTER_MAC": "",
+            "AUTO_INTERCEPT": True,
+            "MQTT_DISCOVERY_PREFIX": "homeassistant",
+            "DEVICE_ID": "siseli_inverter_1",
+            "DEVICE_NAME": "Siseli Inverter 1",
+            "MODEL_NAME": "Siseli Inverter 1",
+            "MANUFACTURER": "Siseli Compatible",
+            "ENTITY_PREFIX": "Siseli",
+            "INVERTER_COUNT": 2,
+            "BATTERY_COUNT": 2,
+            "BATTERY_CAPACITY_PER_BATTERY_AH": 300.0,
+            "STATE_TOPIC": "siseli/siseli_inverter_1/state",
+            "AVAILABILITY_TOPIC": "siseli/siseli_inverter_1/availability",
+            "SNIFF_IFACE": "",
+            "LOG_VERBOSE": True,
+            "LOG_LEVEL": "info",
+            "UPDATE_INTERVAL_SEC": 10,
+            "MQTT_RETAIN": True,
+        }
+        schema = self.cfg["schema"]
+        for key, value in sorted(stored.items()):
+            with self.subTest(option=key):
+                self.assertIn(key, schema, "a stored option lost its schema entry")
+                self.assertTrue(
+                    _validates(value, schema[key]),
+                    f"stored value {value!r} rejected by {schema[key]!r}",
+                )
 
 
 if __name__ == "__main__":

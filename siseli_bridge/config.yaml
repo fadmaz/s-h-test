@@ -1,6 +1,6 @@
 name: 'Siseli Inverter Bridge'
 description: 'Local bridge for Siseli-compatible inverters with MQTT discovery for Home Assistant.'
-version: '2.6.1'
+version: '2.6.2'
 slug: 'siseli_bridge'
 url: 'https://github.com/fadmaz/siseli-ha/blob/main/README.md'
 init: false
@@ -21,6 +21,7 @@ options:
 
   TARGET_HOST: '8.212.18.157'
   TARGET_PORT: 1883
+  LISTEN_PORT: 18899
 
   INVERTER_IP: '192.168.1.139'
   ROUTER_IP: '192.168.1.1'
@@ -60,11 +61,12 @@ schema:
 
   TARGET_HOST: str
   TARGET_PORT: int(1,65535)
+  LISTEN_PORT: int(1,65535)?
 
   INVERTER_IP: str
   ROUTER_IP: str
-  INVERTER_MAC: match(^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$)?
-  ROUTER_MAC: match(^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$)?
+  INVERTER_MAC: match(^(([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2})?$)?
+  ROUTER_MAC: match(^(([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2})?$)?
   AUTO_INTERCEPT: bool
 
   MQTT_DISCOVERY_PREFIX: match(^[A-Za-z0-9_-]{1,64}$)

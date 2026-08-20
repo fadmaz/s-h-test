@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- Siseli Inverter Bridge 2.6.1 ---"
+echo "--- Siseli Inverter Bridge 2.6.2 ---"
 
 export MQTT_HOST="$(bashio::config 'MQTT_HOST' 'core-mosquitto')"
 export MQTT_PORT="$(bashio::config 'MQTT_PORT' '1883')"
@@ -9,6 +9,7 @@ export MQTT_PASSWORD="$(bashio::config 'MQTT_PASSWORD' '')"
 
 export TARGET_HOST="$(bashio::config 'TARGET_HOST' '8.212.18.157')"
 export TARGET_PORT="$(bashio::config 'TARGET_PORT' '1883')"
+export LISTEN_PORT="$(bashio::config 'LISTEN_PORT' '')"
 
 export INVERTER_IP="$(bashio::config 'INVERTER_IP')"
 export ROUTER_IP="$(bashio::config 'ROUTER_IP')"

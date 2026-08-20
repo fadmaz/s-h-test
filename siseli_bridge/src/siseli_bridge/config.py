@@ -12,6 +12,10 @@ ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")
 TARGET_HOST = os.getenv("TARGET_HOST", "8.212.18.157")
 TARGET_PORT = int(os.getenv("TARGET_PORT", "1883"))
 
+#: Deprecated and unused: nothing ever opened a socket. Kept so Supervisor does not
+#: reject the stored option on existing installations. Removed in 2.7.0.
+LISTEN_PORT_DEPRECATED = os.getenv("LISTEN_PORT", "").strip()
+
 AUTO_INTERCEPT = os.getenv("AUTO_INTERCEPT", "true").strip().lower() in {"1", "true", "yes", "on"}
 INVERTER_MAC_CFG = os.getenv("INVERTER_MAC", "").strip().lower() or None
 ROUTER_MAC_CFG = os.getenv("ROUTER_MAC", "").strip().lower() or None
@@ -238,6 +242,13 @@ def validate_config() -> None:
         print(
             f"[CONFIG WARNING] Unknown DEBUG_FLAGS ignored: {', '.join(UNKNOWN_DEBUG_FLAGS)}. "
             f"Valid flags: {', '.join(DEBUG_FLAG_NAMES)}",
+            flush=True,
+        )
+
+    if LISTEN_PORT_DEPRECATED:
+        print(
+            "[CONFIG WARNING] LISTEN_PORT is unused and will be removed in 2.7.0; the "
+            "bridge observes traffic rather than listening on a socket.",
             flush=True,
         )
 
