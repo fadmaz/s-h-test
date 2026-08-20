@@ -11,6 +11,9 @@ configuration:
   MQTT_PASSWORD:
     name: 'MQTT Password'
     description: 'The password for your MQTT broker.'
+  LISTEN_PORT:
+    name: 'Listen Port (deprecated)'
+    description: 'Unused and ignored. The bridge observes traffic rather than listening on a socket. Removed in 2.7.0.'
   INVERTER_IP:
     name: 'Inverter IP Address'
     description: 'The local IPv4 address of your Siseli-compatible inverter (e.g. 192.168.1.139).'

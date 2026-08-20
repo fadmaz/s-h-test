@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-08-20
+
+### Fixed
+
+- **Update Blocked By The Add-on's Own Defaults**: 2.6.1 added a MAC address pattern to `INVERTER_MAC` and `ROUTER_MAC`, both of which ship blank. Home Assistant validates stored options before installing an update and an empty string is a present value, so it had to satisfy the pattern and did not -- blocking the upgrade on every installation with `App ... has invalid options: does not match regular expression`. The pattern now accepts a blank value, which is what the trailing `?` was mistakenly assumed to cover.
+- **Removed Option Blocked The Update**: `LISTEN_PORT` was deleted from the schema in 2.6.1 while existing installations still carry it in their stored options. It is restored as an optional, unused key with a deprecation warning, and will be removed in 2.7.0 once stored copies no longer contain it.
+
+### Added
+
+- **Schema Regression Guard**: Tests now assert that every shipped default satisfies its own schema declaration, and replay a real stored configuration through the schema. Either check would have caught both faults above before release.
+
 ## [2.6.1] - 2026-08-20
 
 ### Fixed
