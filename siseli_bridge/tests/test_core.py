@@ -426,5 +426,56 @@ class TestNonBrokerTraffic(_CoreTestCase):
         self.assertEqual(core.DROPPED_NON_TARGET, {})
 
 
+class TestStartupPath(unittest.TestCase):
+    """The startup banner used to live inline in the __main__ body, where no test
+    could reach it. A private helper that `from .config import *` does not export was
+    referenced there, and the resulting NameError crash-looped the add-on on every
+    start -- with a green test suite and a clean lint run.
+
+    ruff cannot catch it either: core.py carries an F405 exemption because the star
+    import is load-bearing, and F405 is exactly the rule that would have flagged it.
+    Executing the code is the only check that works."""
+
+    def test_logging_the_startup_configuration_does_not_raise(self):
+        with mock.patch("src.siseli_bridge.core.log"):
+            core.log_startup_configuration()
+
+    def test_it_reports_the_active_debug_flags(self):
+        from src.siseli_bridge import config as cfg
+
+        lines = []
+        with mock.patch("src.siseli_bridge.core.log", side_effect=lines.append):
+            core.log_startup_configuration()
+        flags = [ln for ln in lines if "DEBUG_FLAGS" in ln]
+        self.assertEqual(len(flags), 1)
+        for name in cfg.ACTIVE_DEBUG_FLAGS:
+            self.assertIn(name, flags[0])
+
+    def test_no_private_config_name_is_referenced_across_the_star_import(self):
+        """`from module import *` skips every name beginning with an underscore, so a
+        reference to one resolves at runtime, not at import."""
+        import pathlib
+        import re
+
+        src_dir = pathlib.Path(core.__file__).parent
+        private = set(
+            re.findall(r"^_([A-Za-z]\w*)\s*=", (src_dir / "config.py").read_text(encoding="utf-8"), re.M)
+        ) | set(
+            re.findall(r"^def _([a-z]\w*)\(", (src_dir / "config.py").read_text(encoding="utf-8"), re.M)
+        )
+
+        for module in ("core.py", "mqtt.py", "parsers.py"):
+            text = (src_dir / module).read_text(encoding="utf-8")
+            if "from .config import *" not in text:
+                continue
+            for name in sorted(private):
+                with self.subTest(module=module, name=name):
+                    self.assertNotRegex(
+                        text,
+                        r"(?<![\w.])_" + re.escape(name) + r"",
+                        f"_{name} is private to config.py and is not exported by the star import",
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()
