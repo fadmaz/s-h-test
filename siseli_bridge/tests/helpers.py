@@ -138,6 +138,7 @@ def isolated_state():
     saved_evict = parser_mod._FLOW_EVICT_COUNTER
     saved_telemetry_ts = shared_state.LAST_TELEMETRY_TS
     saved_intervals = list(shared_state.TELEMETRY_INTERVALS)
+    saved_clamp_logged = parser_mod.ENERGY_DT_CLAMP_LOGGED
     try:
         yield
     finally:
@@ -158,6 +159,7 @@ def isolated_state():
         shared_state.LAST_TELEMETRY_TS = saved_telemetry_ts
         shared_state.TELEMETRY_INTERVALS.clear()
         shared_state.TELEMETRY_INTERVALS.extend(saved_intervals)
+        parser_mod.ENERGY_DT_CLAMP_LOGGED = saved_clamp_logged
 
 
 # ---------------------------------------------------------------- fake broker

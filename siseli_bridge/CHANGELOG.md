@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.7] - 2026-08-20
+
+### Fixed
+
+- **Calculated Energy Counters Recorded A Fifth Of The Real Energy**: The integrator bounded each step at `max(UPDATE_INTERVAL_SEC * 6, 60)` seconds, which is 60 seconds at the shipped default. Payloads arrive every 300 seconds, with 600 second gaps, so the bound fired on every single step and discarded the rest of each interval. `c_battery_charge_energy_kwh`, `c_battery_discharge_energy_kwh` and `c_grid_import_energy_kwh` therefore accrued 20% of the true energy, dropping to 10% across a gap, and fed those figures straight to the Home Assistant Energy Dashboard. Measured on a live capture: one hour at 5486 W recorded 1.097 kWh instead of 5.486 kWh. The bound is now independent of `UPDATE_INTERVAL_SEC` -- which is an MQTT publish throttle unrelated to how often the inverter reports -- and is floored on the cadence actually measured at runtime.
+- **A Truncated Integration Was Silent**: The bound fired on every payload and logged nothing, which is why a fivefold error survived several releases and a passing test suite. An abnormal gap is now reported once as `[ENERGY GAP CLAMPED]` with both the real and the permitted interval.
+
+### Added
+
+- **Energy Integration Window Tests**: Eight regression tests covering the measured 300 second cadence, the observed 600 second gap, the cadence-derived floor, the ceiling, and an end-to-end hour of discharge. No previous test drove an interval longer than the old bound, so the undercount was invisible to the suite.
+
+### Changed
+
+- **`observed_telemetry_interval()` Moved To `state.py`**: The availability watchdog and the energy integrator now share one measurement of the device's reporting cadence.
+
 ## [2.6.6] - 2026-08-20
 
 ### Fixed

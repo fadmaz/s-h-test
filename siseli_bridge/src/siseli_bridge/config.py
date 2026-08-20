@@ -80,6 +80,16 @@ TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "1800"))
 # Three intervals at the observed 600 s worst-case gap reproduces the 1800 s default.
 TELEMETRY_TIMEOUT_MULTIPLIER = float(os.getenv("TELEMETRY_TIMEOUT_MULTIPLIER", "3"))
 TELEMETRY_TIMEOUT_CEILING_SEC = int(os.getenv("TELEMETRY_TIMEOUT_CEILING_SEC", "3600"))
+
+# Largest interval the energy integrator will credit in one step. Its job is to stop a
+# clock jump or a suspended process dumping a fabricated block of kWh -- NOT to bound
+# normal operation. It was previously derived from UPDATE_INTERVAL_SEC, which is an
+# MQTT publish throttle and has nothing to do with how often the inverter reports:
+# at the default that produced a 60 s ceiling against a measured 300 s cadence, so
+# every counter accrued a fifth of the real energy. The floor below sits above the
+# observed 600 s worst-case gap, and the runtime raises it further from measured
+# cadence.
+ENERGY_MAX_DT_SEC = int(os.getenv("ENERGY_MAX_DT_SEC", "1200"))
 FORWARD_ALL_INVERTER_TRAFFIC = os.getenv("FORWARD_ALL_INVERTER_TRAFFIC", "false").strip().lower() in {"1", "true", "yes", "on"}
 MQTT_RETAIN = os.getenv("MQTT_RETAIN", "true").strip().lower() in {"1", "true", "yes", "on"}
 LOG_LEVEL_STR = os.getenv("LOG_LEVEL", "info").strip().lower()

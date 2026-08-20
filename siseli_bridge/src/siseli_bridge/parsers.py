@@ -16,6 +16,7 @@ from .config import (
     UPDATE_INTERVAL_SEC, EXPIRE_AFTER_SEC, STATE_CACHE_INTERVAL_SEC, INVERTER_COUNT,
     MAX_PENDING_SEGMENTS, MAX_PENDING_BYTES, STREAM_GAP_TIMEOUT_SEC,
     BATTERY_COUNT, BATTERY_CAPACITY_PER_BATTERY_AH,
+    ENERGY_MAX_DT_SEC, TELEMETRY_TIMEOUT_CEILING_SEC,
 )
 
 MQTT_PACKET_TYPES = {
@@ -98,6 +99,8 @@ PENDING_PUBLISH: bool = False
 # One integration clock per domain. A single shared clock plus per-domain gating
 # would silently lose energy: a payload carrying only grid data would advance the
 # clock and the battery integrator would never be credited for that interval.
+#: One-shot guard so an abnormal gap is reported once, not per payload.
+ENERGY_DT_CLAMP_LOGGED = False
 LAST_ENERGY_TS_BATTERY: Optional[float] = None
 LAST_ENERGY_TS_GRID: Optional[float] = None
 _FLOW_EVICT_COUNTER: int = 0
@@ -646,9 +649,41 @@ class SolarParser:
         else:
             LAST_ENERGY_TS_GRID = now_ts
 
-        # Bound dt so a stale timestamp cannot create an unrealistic jump.
-        max_dt_seconds = max(float(UPDATE_INTERVAL_SEC) * 6.0, 60.0)
-        return min(dt_seconds, max_dt_seconds)
+        max_dt_seconds = SolarParser._energy_max_dt()
+        if dt_seconds <= max_dt_seconds:
+            return dt_seconds
+
+        # Only reached when the gap is genuinely abnormal. Logged because the previous
+        # bound fired on every single payload and threw away four fifths of the energy
+        # in complete silence.
+        global ENERGY_DT_CLAMP_LOGGED
+        if not ENERGY_DT_CLAMP_LOGGED:
+            ENERGY_DT_CLAMP_LOGGED = True
+            log_kv(
+                "[ENERGY GAP CLAMPED]",
+                level="warning",
+                domain=domain,
+                dt_seconds=round(dt_seconds, 1),
+                max_dt_seconds=round(max_dt_seconds, 1),
+            )
+        return max_dt_seconds
+
+    @staticmethod
+    def _energy_max_dt() -> float:
+        """Largest interval the integrator will credit in one step.
+
+        Guards against a clock jump or a suspended process crediting a fabricated
+        block of kWh. It must sit *above* normal operation: derived from
+        UPDATE_INTERVAL_SEC it evaluated to 60 s against a measured 300 s cadence, so
+        it truncated every interval and the counters accrued a fifth of the real
+        energy. Floored on observed cadence for the same reason the availability
+        watchdog is -- a configured value cannot be trusted to match the hardware.
+        """
+        observed = _shared_state.observed_telemetry_interval() * 2.0
+        return min(
+            max(float(ENERGY_MAX_DT_SEC), observed),
+            float(TELEMETRY_TIMEOUT_CEILING_SEC),
+        )
 
     @staticmethod
     def _battery_current(state: Dict[str, object], bms_key: str, legacy_key: str, factor: float):

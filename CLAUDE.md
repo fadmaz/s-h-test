@@ -111,12 +111,18 @@ running value is invisible in a user's log.
 remove it from anyone's dashboard — the cached value is restored and republished.
 Purge it in `load_cached_state` via `UNDECODED_SENSOR_KEYS`.
 
-**Timing defaults must come from measured cadence,** not from another option. This
-inverter reports every ~300s with 600s gaps; a timeout derived from
-`UPDATE_INTERVAL_SEC` made every sensor flap. The observed cadence is a fixture in
-`tests/test_core.py`. Better still, measure it at runtime — the availability watchdog
-floors its timeout on the intervals it actually sees, which is what makes it immune to
-the pinned-option trap above.
+**Timing bounds must come from measured cadence,** not from another option. This has
+now caused two separate user-visible faults, both from `UPDATE_INTERVAL_SEC` — which
+is an MQTT *publish throttle* and says nothing about how often the inverter reports.
+This inverter reports every ~300s with 600s gaps. A timeout derived from that option
+made every sensor flap; an energy-integration ceiling derived from it evaluated to 60s
+and truncated every interval, so all three kWh counters accrued a fifth of the real
+energy while the whole suite passed. The observed cadence is a fixture in
+`tests/test_core.py`. Better still, measure it at runtime:
+`state.observed_telemetry_interval()` feeds both `effective_telemetry_timeout()` and
+`SolarParser._energy_max_dt()`, which is what makes them immune to the pinned-option
+trap above. If you add a bound that fires during normal operation, log it — the
+energy clamp fired on every payload in total silence.
 
 **`gh` defaults to the upstream fork.** Always pass `--repo fadmaz/siseli-ha`.
 

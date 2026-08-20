@@ -42,6 +42,16 @@ TELEMETRY_INTERVALS: Deque[float] = collections.deque(maxlen=8)
 DISCOVERY_CLEANED: bool = False
 
 
+def observed_telemetry_interval() -> float:
+    """Largest recent gap between decoded payloads; 0.0 until two have arrived.
+
+    Read by the availability watchdog and by the energy integrator. Both need a bound
+    that tracks the device's real cadence rather than an unrelated config option.
+    """
+    intervals = list(TELEMETRY_INTERVALS)
+    return max(intervals) if intervals else 0.0
+
+
 def record_telemetry(now: Optional[float] = None) -> None:
     """Stamp a decoded payload and remember the gap since the previous one."""
     global LAST_TELEMETRY_TS
