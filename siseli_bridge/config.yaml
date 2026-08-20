@@ -1,6 +1,6 @@
 name: 'Siseli Inverter Bridge'
 description: 'Local bridge for Siseli-compatible inverters with MQTT discovery for Home Assistant.'
-version: '2.5.24'
+version: '2.6.1'
 slug: 'siseli_bridge'
 url: 'https://github.com/fadmaz/siseli-ha/blob/main/README.md'
 init: false
@@ -25,7 +25,6 @@ options:
 
   TARGET_HOST: '8.212.18.157'
   TARGET_PORT: 1883
-  LISTEN_PORT: 18899
 
   INVERTER_IP: '192.168.1.139'
   ROUTER_IP: '192.168.1.1'
@@ -43,32 +42,37 @@ options:
   BATTERY_COUNT: 1
   BATTERY_CAPACITY_PER_BATTERY_AH: 0.0
 
-  STATE_TOPIC: 'siseli/siseli_inverter_1/state'
-  AVAILABILITY_TOPIC: 'siseli/siseli_inverter_1/availability'
+  STATE_TOPIC: ''
+  AVAILABILITY_TOPIC: ''
   SNIFF_IFACE: ''
-  LOG_VERBOSE: true
+  LOG_VERBOSE: false
+  DEBUG_FLAGS: []
   LOG_LEVEL: 'info'
   UPDATE_INTERVAL_SEC: 10
+  EXPIRE_AFTER_SEC: 600
+  RESET_ENERGY_COUNTERS: false
+  DISCOVERY_CLEANUP: true
+  TELEMETRY_TIMEOUT_SEC: 180
+  FORWARD_ALL_INVERTER_TRAFFIC: false
   MQTT_RETAIN: true
 
 schema:
   MQTT_HOST: str
-  MQTT_PORT: int
+  MQTT_PORT: int(1,65535)
   MQTT_USER: str?
   MQTT_PASSWORD: password?
 
   TARGET_HOST: str
-  TARGET_PORT: int
-  LISTEN_PORT: int
+  TARGET_PORT: int(1,65535)
 
   INVERTER_IP: str
   ROUTER_IP: str
-  INVERTER_MAC: str?
-  ROUTER_MAC: str?
+  INVERTER_MAC: match(^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$)?
+  ROUTER_MAC: match(^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$)?
   AUTO_INTERCEPT: bool
 
-  MQTT_DISCOVERY_PREFIX: str
-  DEVICE_ID: str
+  MQTT_DISCOVERY_PREFIX: match(^[A-Za-z0-9_-]{1,64}$)
+  DEVICE_ID: match(^[a-zA-Z0-9_-]+$)
   DEVICE_NAME: str
   MODEL_NAME: str
   MANUFACTURER: str
@@ -77,10 +81,17 @@ schema:
   BATTERY_COUNT: int(1,64)
   BATTERY_CAPACITY_PER_BATTERY_AH: float(0,)
 
-  STATE_TOPIC: str
-  AVAILABILITY_TOPIC: str
+  STATE_TOPIC: str?
+  AVAILABILITY_TOPIC: str?
   SNIFF_IFACE: str?
-  LOG_VERBOSE: bool
+  LOG_VERBOSE: bool?
+  DEBUG_FLAGS:
+    - list(xray|packets|blocks|state_diff|state_snapshot|raw_json|clean_state|mqtt_topics|mqtt_payload_preview|unparsed_publish|stream_events|null_targets)
   LOG_LEVEL: list(debug|info|warning|error)
-  UPDATE_INTERVAL_SEC: int(0,)
+  UPDATE_INTERVAL_SEC: int(1,3600)
+  EXPIRE_AFTER_SEC: int(0,)
+  RESET_ENERGY_COUNTERS: bool
+  DISCOVERY_CLEANUP: bool
+  TELEMETRY_TIMEOUT_SEC: int(30,)
+  FORWARD_ALL_INVERTER_TRAFFIC: bool
   MQTT_RETAIN: bool

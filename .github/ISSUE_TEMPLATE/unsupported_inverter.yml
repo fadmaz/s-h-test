@@ -1,0 +1,51 @@
+name: Unsupported inverter / sensors not decoding
+description: Data arrives but few or no sensors get values
+labels: ["decoding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The single most useful thing you can attach is a short debug capture. The raw
+        block lines it produces become test fixtures, which is how support for a new
+        device actually gets added.
+  - type: input
+    id: model
+    attributes:
+      label: Inverter brand and model
+      placeholder: e.g. PowMr HPVINV04
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: Shown as "Firmware Version" in Home Assistant, or in the official app.
+  - type: input
+    id: version
+    attributes:
+      label: Add-on version
+    validations:
+      required: true
+  - type: textarea
+    id: blocks
+    attributes:
+      label: Debug capture
+      description: |
+        Set **Debug Flags** to `blocks` and `unparsed_publish`, and **Log Level** to
+        `info`. Let it run for about two minutes, then set Debug Flags back to empty --
+        the output is per-packet and it lands on your SD card.
+
+        Paste the `[BLOCK RAW]` and `[UNPARSED PAYLOAD]` lines.
+
+        Please scrub the `topic=` values: the Siseli cloud topic contains your device
+        serial. The block contents themselves are just readings.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: app
+    attributes:
+      label: What the official app shows
+      description: |
+        The values the app displays at the same moment, so the decode can be checked
+        against ground truth. A screenshot is fine.

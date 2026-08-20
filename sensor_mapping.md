@@ -2,11 +2,16 @@
 
 > **Absolute Transparency Verified:** Using the newly minted `changed_values` logs you generated, we explicitly pull exactly how the live Home Assistant database sees the strings, side-by-side with what your App GUI reported. It is a 100% transparent translation pipeline.
 
+> **⚠️ Update for 2.6.0:** rows marked *(Not decoded — preset removed in 2.6.0)* were
+> never decoded from the wire. They came from hardcoded presets keyed on one specific
+> inverter's configuration and have been removed. The values recorded below are what
+> the bridge used to publish, not what it read.
+
 | Raw MQTT ID | HA Database Live State | Official App UI Real-Time Trace | HA Clean Label | Entity Location |
 |---|---|---|---|---|
 | `model_code` | `HPVINV04` | **HPVINV04** | Device Type | ⚙️ Diagnostic Card |
-| `output_model` | `PAL` | **PAL** | Output Model | ⚙️ Diagnostic Card |
-| `mode` | `Battery Mode` | **Battery Mode** | Mode | ⚙️ Diagnostic Card |
+| `output_model` | `PAL` | **PAL** | Output Model | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `mode` | `Battery Mode` | **Battery Mode** | Mode | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `status_code` | `00` | **00** | Status Code | ⚙️ Diagnostic Card |
 | `firmware_info` | `0010.11 20250630 14` | **0010.11 20250630 14** | Firmware Info | ⚙️ Diagnostic Card |
 | `firmware_version` | `0010.11` | **10.11** | Firmware Version | ⚙️ Diagnostic Card |
@@ -71,48 +76,48 @@
 | `solar_charging_switch` | `Open` | **Open** | Solar Charging Switch | 🌟 Main Sensors Card |
 | `bus_voltage` | `403.0 V` | **403 V** | BUS Voltage | ⚙️ Diagnostic Card |
 | `ac_charging_switch` | `Close` | **Close** | AC Charging Switch | ⚙️ Diagnostic Card |
-| `abnormal_fan_speed` | `No` | **No** | Abnormal Fan Speed | ⚙️ Diagnostic Card |
-| `abnormal_low_pv_power` | `No` | **No** | Abnormal Low PV Power | ⚙️ Diagnostic Card |
-| `abnormal_temperature_sensor` | `No` | **No** | Abnormal Temperature Sensor | ⚙️ Diagnostic Card |
+| `abnormal_fan_speed` | `No` | **No** | Abnormal Fan Speed | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `abnormal_low_pv_power` | `No` | **No** | Abnormal Low PV Power | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `abnormal_temperature_sensor` | `No` | **No** | Abnormal Temperature Sensor | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `automatic_return_to_first_page` | `On` | **On** | Automatic Return To The First Page Function | ⚙️ Diagnostic Card |
-| `bms_allow_charging_flag` | `Yes` | **Yes** | BMS Allow Charging Flag | ⚙️ Diagnostic Card |
-| `bms_allow_discharge_flag` | `Yes` | **Yes** | BMS Allow Discharge Flag | ⚙️ Diagnostic Card |
+| `bms_allow_charging_flag` | `Yes` | **Yes** | BMS Allow Charging Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `bms_allow_discharge_flag` | `Yes` | **Yes** | BMS Allow Discharge Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `bms_auto_start_soc_after_low` | `25 %` | **25 %** | BMS Automatically Starts SOC After Low | ⚙️ Diagnostic Card |
 | `bms_avg_temp_c` | `*(Static)*` | **20.95 °C** | BMS Average Temperature | ⚙️ Diagnostic Card |
 | `bms_charge_current_limit_a` | `195.0 A` | **195 A** | BMS Charge Current Limit | ⚙️ Diagnostic Card |
 | `bms_charge_voltage_limit_v` | `57.6 V` | **57.6 V** | BMS Charge Voltage Limit | ⚙️ Diagnostic Card |
 | `bms_charging_current_a` | `10.7 A` | **10.7 A** | BMS Charging Current | ⚙️ Diagnostic Card |
-| `bms_charging_overcurrent_sign` | `No` | **No** | BMS Charging Overcurrent Sign | ⚙️ Diagnostic Card |
-| `bms_communication_control_function` | `Open` | **Open** | BMS Communication Control Function | ⚙️ Diagnostic Card |
-| `bms_communication_normal` | `Yes` | **Yes** | BMS Communication Normal | ⚙️ Diagnostic Card |
+| `bms_charging_overcurrent_sign` | `No` | **No** | BMS Charging Overcurrent Sign | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `bms_communication_control_function` | `Open` | **Open** | BMS Communication Control Function | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `bms_communication_normal` | `Yes` | **Yes** | BMS Communication Normal | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `bms_current_soc` | `88 %` | **88 %** | BMS Current SOC | ⚙️ Diagnostic Card |
 | `bms_discharge_current_a` | `0.0 A` | **0 A** | BMS Discharge Current | ⚙️ Diagnostic Card |
-| `bms_discharge_overcurrent_flag` | `No` | **No** | BMS Discharge Overcurrent Flag | ⚙️ Diagnostic Card |
+| `bms_discharge_overcurrent_flag` | `No` | **No** | BMS Discharge Overcurrent Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `bms_discharge_voltage_limit_v` | `42.0 V` | **42 V** | BMS Discharge Voltage Limit | ⚙️ Diagnostic Card |
-| `bms_low_battery_alarm_flag` | `No` | **No** | BMS Low Battery Alarm Flag | ⚙️ Diagnostic Card |
-| `bms_low_power_fault_flag` | `No` | **No** | BMS Low Power Fault Flag | ⚙️ Diagnostic Card |
+| `bms_low_battery_alarm_flag` | `No` | **No** | BMS Low Battery Alarm Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `bms_low_power_fault_flag` | `No` | **No** | BMS Low Power Fault Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `bms_low_power_soc` | `15 %` | **15 %** | BMS Low Power SOC | ⚙️ Diagnostic Card |
-| `bms_low_temperature_flag` | `No` | **No** | BMS Low Temperature Flag | ⚙️ Diagnostic Card |
+| `bms_low_temperature_flag` | `No` | **No** | BMS Low Temperature Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `bms_returns_to_battery_mode_soc` | `50 %` | **50 %** | BMS Returns To Battery Mode SOC | ⚙️ Diagnostic Card |
 | `bms_returns_to_mains_mode_soc` | `35 %` | **35 %** | BMS Returns To Mains Mode SOC | ⚙️ Diagnostic Card |
-| `bms_temperature_too_high_flag` | `No` | **No** | BMS Temperature Too High Flag | ⚙️ Diagnostic Card |
+| `bms_temperature_too_high_flag` | `No` | **No** | BMS Temperature Too High Flag | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `battery_equalization_mode` | `Disable` | **Disable** | Battery Equalization Mode | ⚙️ Diagnostic Card |
 | `battery_equalization_voltage_v` | `58.4 V` | **58.4 V** | Battery Equalization Voltage | ⚙️ Diagnostic Card |
-| `battery_not_connected` | `No` | **No** | Battery Not Connected | ⚙️ Diagnostic Card |
+| `battery_not_connected` | `No` | **No** | Battery Not Connected | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `battery_overvoltage_shutdown_voltage_v` | `44.0 V` | **44 V** | Battery Overvoltage Shutdown Voltage | ⚙️ Diagnostic Card |
-| `battery_voltage_higher` | `No` | **No** | Battery Voltage Higher | ⚙️ Diagnostic Card |
+| `battery_voltage_higher` | `No` | **No** | Battery Voltage Higher | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `boost_temperature_c` | `27.0 °C` | **27 °C** | Boost Temperature | ⚙️ Diagnostic Card |
 | `buzzer_function` | `On` | **On** | Buzzer Function | ⚙️ Diagnostic Card |
-| `charging_light_status` | `Light` | **Flicker** | Charging Light Status | ⚙️ Diagnostic Card |
-| `charging_main_switch` | `Open` | **Open** | Charging Main Switch | ⚙️ Diagnostic Card |
+| `charging_light_status` | `Light` | **Flicker** | Charging Light Status | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `charging_main_switch` | `Open` | **Open** | Charging Main Switch | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `charging_priority_order` | `SNU` | **SNU** | Charging Priority Order | ⚙️ Diagnostic Card |
 | `ct_function_switch` | `OFF` | **OFF** | CT Function Switch | ⚙️ Diagnostic Card |
 | `dc_rectification_temperature_c` | `42.0 °C` | **42 °C** | DC Rectification Temperature | ⚙️ Diagnostic Card |
 | `does_machine_have_output` | `Yes` | **Yes** | Does The Machine Have An Output | ⚙️ Diagnostic Card |
 | `dual_output_mode` | `On` | **On** | Dual Output Mode | ⚙️ Diagnostic Card |
 | `eco` | `Off` | **Off** | ECO | ⚙️ Diagnostic Card |
-| `eeprom_data_abnormality` | `No` | **No** | EEPROM Data Abnormality | ⚙️ Diagnostic Card |
-| `eeprom_read_write_exception` | `No` | **No** | EEPROM Read Write Exception | ⚙️ Diagnostic Card |
+| `eeprom_data_abnormality` | `No` | **No** | EEPROM Data Abnormality | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `eeprom_read_write_exception` | `No` | **No** | EEPROM Read Write Exception | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `equalization_interval` | `30 day` | **30 day** | Equalization Interval | ⚙️ Diagnostic Card |
 | `equalization_overtime` | `120 min` | **120 min** | Equalization Overtime | ⚙️ Diagnostic Card |
 | `equalization_time` | `60 min` | **60 min** | Equalization Time | ⚙️ Diagnostic Card |
@@ -128,41 +133,41 @@
 | `high_point_of_mains_power_loss_voltage_v` | `280.0 V` | **280 V** | High Point Of Mains Power Loss Voltage | ⚙️ Diagnostic Card |
 | `inductor_current_a` | `6.7 A` | **6.7 A** | Inductor Current | ⚙️ Diagnostic Card |
 | `input_source_prompt_function` | `On` | **On** | Input Source Prompt Function | ⚙️ Diagnostic Card |
-| `input_voltage_too_high` | `No` | **No** | Input Voltage Too High | ⚙️ Diagnostic Card |
-| `inverter_light_status` | `Light` | **Light** | Inverter Light Status | ⚙️ Diagnostic Card |
+| `input_voltage_too_high` | `No` | **No** | Input Voltage Too High | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `inverter_light_status` | `Light` | **Light** | Inverter Light Status | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `inverter_temperature_c` | `39.0 °C` | **39 °C** | Inverter Temperature | ⚙️ Diagnostic Card |
-| `lcd_back_lighting` | `On` | **On** | LCD Back Lighting | ⚙️ Diagnostic Card |
-| `li_battery_activation_function_switch` | `Close` | **Close** | Li Battery Activation Function Switch | ⚙️ Diagnostic Card |
-| `li_battery_activation_process` | `Stop` | **Stop** | Li Battery Activation Process | ⚙️ Diagnostic Card |
-| `low_battery_alarm` | `No` | **No** | Low Battery Alarm | ⚙️ Diagnostic Card |
+| `lcd_back_lighting` | `On` | **On** | LCD Back Lighting | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `li_battery_activation_function_switch` | `Close` | **Close** | Li Battery Activation Function Switch | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `li_battery_activation_process` | `Stop` | **Stop** | Li Battery Activation Process | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `low_battery_alarm` | `No` | **No** | Low Battery Alarm | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `low_electric_lock_voltage_v` | `42.0 V` | **42 V** | Low Electric Lock Voltage | ⚙️ Diagnostic Card |
 | `low_frequency_of_mains_power_loss_hz` | `40.0 Hz` | **40 Hz** | Low Frequency Of Mains Power Loss | ⚙️ Diagnostic Card |
 | `low_point_of_mains_power_loss_voltage_v` | `170.0 V` | **170 V** | Low Point Of Mains Power Loss Voltage | ⚙️ Diagnostic Card |
-| `machine_over_temperature` | `No` | **No** | Machine Over Temperature | ⚙️ Diagnostic Card |
+| `machine_over_temperature` | `No` | **No** | Machine Over Temperature | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `main_output_relay_status` | `On` | **On** | Main Output Relay Status | ⚙️ Diagnostic Card |
 | `mains_charging_ending_time` | `0 h` | **0 h** | Mains Charging Ending Time | ⚙️ Diagnostic Card |
 | `mains_charging_starting_time` | `0 h` | **0 h** | Mains Charging Starting Time | ⚙️ Diagnostic Card |
 | `mains_input_range` | `UPS` | **UPS** | Mains Input Range | ⚙️ Diagnostic Card |
-| `mains_light_status` | `Flicker` | **Flicker** | Mains Light Status | ⚙️ Diagnostic Card |
+| `mains_light_status` | `Flicker` | **Flicker** | Mains Light Status | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `max_utility_charge_current_a` | `10 A` | **10 A** | Max utility charge current | ⚙️ Diagnostic Card |
 | `max_temperature_c` | `53.0 °C` | **53 °C** | Max. Temperature | ⚙️ Diagnostic Card |
 | `maximum_total_charging_current_a` | `50 A` | **50 A** | Maximum Total Charging Current | ⚙️ Diagnostic Card |
-| `mppt_constant_temperature_mode` | `Disable` | **Disable** | MPPT Constant Temperature Mode | ⚙️ Diagnostic Card |
+| `mppt_constant_temperature_mode` | `Disable` | **Disable** | MPPT Constant Temperature Mode | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `output_ending_time` | `0 h` | **0 h** | Output Ending Time | ⚙️ Diagnostic Card |
 | `output_set_frequency` | `49.9 Hz` | **50 Hz** | Output Set Frequency | ⚙️ Diagnostic Card |
 | `output_set_voltage` | `230 V` | **230 V** | Output Set Voltage | ⚙️ Diagnostic Card |
 | `output_starting_time` | `0 h` | **0 h** | Output Starting Time | ⚙️ Diagnostic Card |
-| `over_temperature_restart_function` | `Open` | **Open** | Over Temperature Restart Function | ⚙️ Diagnostic Card |
-| `overloaded` | `No` | **No** | OverLoaded | ⚙️ Diagnostic Card |
-| `overload_restart_function` | `Close` | **Close** | Overload Restart Function | ⚙️ Diagnostic Card |
-| `overload_to_bypass_function` | `Close` | **Close** | Overload To Bypass Function | ⚙️ Diagnostic Card |
+| `over_temperature_restart_function` | `Open` | **Open** | Over Temperature Restart Function | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `overloaded` | `No` | **No** | OverLoaded | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `overload_restart_function` | `Close` | **Close** | Overload Restart Function | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `overload_to_bypass_function` | `Close` | **Close** | Overload To Bypass Function | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `parallel_mode` | `Enable` | **Enable** | Parallel Mode | ⚙️ Diagnostic Card |
 | `parallel_mode_turn_off_soc` | `20 %` | **20 %** | Parallel Mode Turn Off SOC | ⚙️ Diagnostic Card |
 | `parallel_mode_turn_off_voltage_v` | `44.0 V` | **44 V** | Parallel Mode Turn Off Voltage | ⚙️ Diagnostic Card |
 | `parallel_role` | `Host` | **Host** | Parallel Role | ⚙️ Diagnostic Card |
 | `power_supply_from_pv_to_load_in_ac_state` | `No` | **No** | Power Supply From PV To Load In AC State | ⚙️ Diagnostic Card |
-| `pv_energy_feeding_priority` | `LBU` | **LBU** | PV Energy Feeding Priority | ⚙️ Diagnostic Card |
-| `pv_grid_connection_agreement` | `3` | **3** | PV Grid Connection Agreement | ⚙️ Diagnostic Card |
+| `pv_energy_feeding_priority` | `LBU` | **LBU** | PV Energy Feeding Priority | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
+| `pv_grid_connection_agreement` | `3` | **3** | PV Grid Connection Agreement | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `return_to_battery_mode_voltage_v` | `54.0 V` | **54 V** | Return To Battery Mode Voltage | ⚙️ Diagnostic Card |
 | `return_to_mains_mode_voltage_v` | `46.0 V` | **46 V** | Return To Mains Mode Voltage | ⚙️ Diagnostic Card |
 | `second_delay_time` | `5 min` | **5 min** | Second Delay Time | ⚙️ Diagnostic Card |
@@ -175,7 +180,7 @@
 | `system_time_ymd` | `260317` | **260317** | System Time (Year Month Day) | ⚙️ Diagnostic Card |
 | `total_number_of_grid_connection` | `2` | **2** | Total Number Of Grid Connection | ⚙️ Diagnostic Card |
 | `transformer_temperature_c` | `53.0 °C` | **53 °C** | Transformer Temperature | ⚙️ Diagnostic Card |
-| `warning_light_status` | `Off` | **Off** | Warning Light Status | ⚙️ Diagnostic Card |
+| `warning_light_status` | `Off` | **Off** | Warning Light Status | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `working_mode` | `SBU` | **SBU** | Working Mode | ⚙️ Diagnostic Card |
 | `mains_wdrr_token` | `*(Static)*` | ***(Hidden)*** | Mains WdRR Token | ⚙️ Diagnostic Card |
 | `mains_wdrr_value` | `*(Static)*` | ***(Hidden)*** | Mains WdRR Value | ⚙️ Diagnostic Card |
@@ -192,7 +197,7 @@
 | `mains_input_range_code` | `*(Static)*` | ***(Hidden)*** | Mains Input Range Code | ⚙️ Diagnostic Card |
 | `bat_temp` | `39.0 °C` | ***(Hidden)*** | Inverter Temperature (legacy) | ⚙️ Diagnostic Card |
 | `max_chg` | `50 A` | ***(Hidden)*** | Max Charge Current (legacy) | ⚙️ Diagnostic Card |
-| `util_chg` | `*(Static)*` | ***(Hidden)*** | Utility Charge Current (candidate) | ⚙️ Diagnostic Card |
+| `util_chg` | `*(Static)*` | ***(Hidden)*** | Utility Charge Current (candidate) | ⚙️ Diagnostic Card *(Not decoded — preset removed in 2.6.0)* |
 | `bulk_v` | `56.4 V` | ***(Hidden)*** | Bulk Charging Voltage (legacy) | ⚙️ Diagnostic Card |
 | `float_v` | `56.4 V` | ***(Hidden)*** | Float Charging Voltage (legacy) | ⚙️ Diagnostic Card |
 | `cut_v` | `42.0 V` | ***(Hidden)*** | Low Battery Cut-off (legacy) | ⚙️ Diagnostic Card |

@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=61"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "siseli-bridge"
-version = "2.5.24"
+dynamic = ["version"]
 requires-python = ">=3.9"
 dependencies = [
     "paho-mqtt>=1.6,<2.0",
@@ -15,7 +15,20 @@ dependencies = [
 dev = [
     "pytest>=7",
     "pytest-cov>=4",
+    "pyyaml",
+    "ruff",
 ]
+
+# The runtime is launched as `python3 -m src.siseli_bridge.core` from /app, so the
+# import root is siseli_bridge/ and the top-level package is literally `src`.
+# Auto-discovery cannot infer that (siseli_bridge/ has no __init__.py), so it is
+# declared explicitly -- without this the backend builds an empty wheel.
+[tool.setuptools]
+package-dir = { "" = "siseli_bridge" }
+packages = ["src", "src.siseli_bridge"]
+
+[tool.setuptools.dynamic]
+version = { attr = "src.siseli_bridge.version.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["siseli_bridge/tests"]
@@ -26,3 +39,20 @@ python_functions = ["test_*"]
 [tool.coverage.run]
 source = ["siseli_bridge/src"]
 omit = ["*/__pycache__/*", "*/tests/*"]
+
+# Defect-only rule set: every rule here fires on a genuine bug, never on taste, so
+# it can gate CI without becoming a nuisance. No formatter -- reformatting ~2,500
+# lines would destroy git blame on hard-won parser knowledge.
+[tool.ruff]
+target-version = "py39"
+line-length = 200
+
+[tool.ruff.lint]
+select = ["E9", "F", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The star-imports are load-bearing; unwinding them is a refactor, not a lint fix.
+"siseli_bridge/src/siseli_bridge/core.py" = ["F403", "F405"]
+"siseli_bridge/src/siseli_bridge/mqtt.py" = ["F403", "F405"]
+"siseli_bridge/src/siseli_bridge/parsers.py" = ["F403", "F405"]

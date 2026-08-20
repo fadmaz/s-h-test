@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 import re
 import time
 from datetime import datetime
@@ -11,11 +10,11 @@ from .loggers import log, log_kv, json_log, log_payload_preview, log_error_alway
 from .sensors import SENSORS
 from .config import (
     STATE_CACHE_FILE, STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER,
-    MAX_MQTT_PACKET, PRINTABLE_ASCII_RE, STRICT_NUM_RE, SLUG_RE,
-    LOG_VERBOSE, LOG_BLOCKS, LOG_STATE_DIFF, LOG_STATE_SNAPSHOT,
-    LOG_RAW_JSON, LOG_CLEAN_STATE, LOG_MQTT_TOPICS,
-    LOG_MQTT_PAYLOAD_PREVIEW, LOG_UNPARSED_PUBLISH, LOG_NULL_TARGETS,
-    UPDATE_INTERVAL_SEC, INVERTER_COUNT,
+    MAX_MQTT_PACKET, PRINTABLE_ASCII_RE, STRICT_NUM_RE,
+    LOG_BLOCKS, LOG_STATE_DIFF, LOG_STATE_SNAPSHOT,
+    LOG_RAW_JSON, LOG_CLEAN_STATE, LOG_MQTT_PAYLOAD_PREVIEW, LOG_UNPARSED_PUBLISH, LOG_NULL_TARGETS,
+    UPDATE_INTERVAL_SEC, EXPIRE_AFTER_SEC, STATE_CACHE_INTERVAL_SEC, INVERTER_COUNT,
+    MAX_PENDING_SEGMENTS, MAX_PENDING_BYTES, STREAM_GAP_TIMEOUT_SEC,
     BATTERY_COUNT, BATTERY_CAPACITY_PER_BATTERY_AH,
 )
 
@@ -44,25 +43,63 @@ def mqtt_type_name(first_byte: int) -> str:
 
 
 
+SEQ_MOD = 1 << 32
+SEQ_HALF = 1 << 31
+
+
+def seq_diff(a: int, b: int) -> int:
+    """Distance from b to a in TCP sequence space."""
+    return (a - b) % SEQ_MOD
+
+
+def seq_lt(a: int, b: int) -> bool:
+    """True when a precedes b, accounting for 32-bit wraparound (RFC 1982)."""
+    return 0 < seq_diff(b, a) < SEQ_HALF
+
+
+def seq_gt(a: int, b: int) -> bool:
+    return seq_lt(b, a)
+
+
 class TcpFlowState:
     def __init__(self) -> None:
         self.next_seq: Optional[int] = None
         self.pending: Dict[int, bytes] = {}
+        self.pending_bytes = 0
         self.stream = bytearray()
+        #: Last activity of any kind. Drives eviction of dead flows.
         self.last_seen = time.time()
+        #: Last time next_seq actually advanced. Drives the stale reset -- using
+        #: last_seen for that meant a flow wedged behind a missing segment kept
+        #: itself alive forever, because parking a segment counts as activity.
+        self.last_progress = time.time()
+        #: When the current gap started, or None if there is no gap.
+        self.gap_since: Optional[float] = None
 
     def reset(self) -> None:
         self.next_seq = None
         self.pending.clear()
+        self.pending_bytes = 0
         self.stream.clear()
-        self.last_seen = time.time()
+        now = time.time()
+        self.last_seen = now
+        self.last_progress = now
+        self.gap_since = None
 
 
 FLOW_STATES: Dict[Tuple[str, int, str, int], TcpFlowState] = {}
 SEEN_MQTT_TOPICS: Dict[str, int] = {}
 IMPORTANT_DEBUG_KEYS = ("bms_avg_temp_c", "mains_current_flow_direction")
 LAST_PUBLISH_TS: float = 0.0
-LAST_ENERGY_TS: Optional[float] = None
+LAST_CACHE_WRITE_TS: float = 0.0
+# Set when a value changed but the throttle window has not elapsed, so the
+# change is deferred rather than dropped.
+PENDING_PUBLISH: bool = False
+# One integration clock per domain. A single shared clock plus per-domain gating
+# would silently lose energy: a payload carrying only grid data would advance the
+# clock and the battery integrator would never be credited for that interval.
+LAST_ENERGY_TS_BATTERY: Optional[float] = None
+LAST_ENERGY_TS_GRID: Optional[float] = None
 _FLOW_EVICT_COUNTER: int = 0
 _FLOW_EVICT_INTERVAL: int = 200  # Prune stale TCP flows every N state lookups.
 
@@ -132,6 +169,44 @@ def validate_publish_packet(packet: bytes) -> bool:
     return True
 
 
+#: Upper bound for the variable-length control packets. The protocol allows up to
+#: 256 MB, but an inverter's CONNECT and SUBSCRIBE carry a client id and a handful of
+#: topics -- hundreds of bytes. Leaving these unbounded let a random byte with the
+#: right nibble declare a 46 KB frame and swallow the genuine PUBLISHes behind it.
+#: The bridge only reads these types to stay frame-aligned, so an over-tight bound
+#: costs one byte-slide and a resync, never telemetry.
+_CONTROL_MAX = 2048
+
+#: Per control type: (required low-nibble flags, min remaining length, max remaining
+#: length). -1 means "not fixed". MQTT 3.1.1 mandates specific reserved flag bits and
+#: exact lengths for most control packets, and enforcing them is what makes byte-wise
+#: resynchronisation converge instead of accepting arbitrary data as a frame.
+_MQTT_TYPE_RULES = {
+    1: (0, 10, _CONTROL_MAX),    # CONNECT
+    2: (0, 2, 2),                # CONNACK
+    4: (0, 2, 2),                # PUBACK
+    5: (0, 2, 2),                # PUBREC
+    6: (2, 2, 2),                # PUBREL
+    7: (0, 2, 2),                # PUBCOMP
+    8: (2, 5, _CONTROL_MAX),     # SUBSCRIBE
+    9: (0, 3, _CONTROL_MAX),     # SUBACK
+    10: (2, 5, _CONTROL_MAX),    # UNSUBSCRIBE
+    11: (0, 2, 2),               # UNSUBACK
+    12: (0, 0, 0),    # PINGREQ
+    13: (0, 0, 0),    # PINGRESP
+    14: (0, 0, 0),    # DISCONNECT
+}
+
+
+def _is_minimal_varint(packet: bytes, start: int, end: int) -> bool:
+    """MQTT requires the shortest encoding of the remaining length.
+
+    A trailing 0x00 continuation byte encodes the same value in more bytes, and
+    accepting it lets a large class of random data pass as a valid header.
+    """
+    return (end - start) == 1 or packet[end - 1] != 0
+
+
 def validate_generic_mqtt_packet(packet: bytes) -> bool:
     if not packet:
         return False
@@ -147,12 +222,89 @@ def validate_generic_mqtt_packet(packet: bytes) -> bool:
     if remaining_len is None or pos is None:
         return False
 
+    # The caller slices the buffer to exactly this length, so on its own this check is
+    # tautological -- the per-type rules below are what actually reject a bogus frame.
     if len(packet) != pos + remaining_len:
         return False
 
     if len(packet) > MAX_MQTT_PACKET:
         return False
 
+    if not _is_minimal_varint(packet, 1, pos):
+        return False
+
+    rule = _MQTT_TYPE_RULES.get(packet_type)
+    if rule is None:
+        return False
+
+    required_flags, min_remaining, max_remaining = rule
+    if (packet[0] & 0x0F) != required_flags:
+        return False
+    if remaining_len < min_remaining:
+        return False
+    if max_remaining >= 0 and remaining_len > max_remaining:
+        return False
+
+    # Packet identifiers are 1..65535; zero never appears on the wire.
+    if packet_type in (4, 5, 6, 7, 8, 9, 10, 11) and remaining_len >= 2:
+        if int.from_bytes(packet[pos:pos + 2], "big") == 0:
+            return False
+
+    if packet_type == 1:
+        name_len = int.from_bytes(packet[pos:pos + 2], "big")
+        name = packet[pos + 2:pos + 2 + name_len]
+        if name not in (b"MQTT", b"MQIsdp"):
+            return False
+
+    if packet_type == 2:
+        if packet[pos] > 1 or packet[pos + 1] > 5:
+            return False
+
+    return True
+
+
+def _header_is_plausible(stream: bytearray, packet_type: int, remaining_len: int, header_end: int) -> bool:
+    """Cheap validation using only the fixed header, before the body has arrived.
+
+    The extractor has to decide between *waiting* for more TCP data and *sliding* one
+    byte to resynchronise. Without this it always waited, so a bogus header declaring
+    a length longer than the buffer stalled the stream indefinitely and then consumed
+    the genuine packets queued behind it.
+    """
+    if not _is_minimal_varint(stream, 1, header_end):
+        return False
+
+    if packet_type == 3:
+        # Reserved bit 0 of the flags is the RETAIN flag and may be set; QoS 3 is not
+        # a valid value.
+        if ((stream[0] >> 1) & 0x03) == 3:
+            return False
+        if remaining_len < 2:
+            return False
+        if len(stream) >= header_end + 2:
+            topic_len = int.from_bytes(stream[header_end:header_end + 2], "big")
+            if topic_len <= 0 or topic_len > 256 or topic_len > remaining_len:
+                return False
+            # If the topic itself has arrived, check it before committing to a length
+            # that may be tens of kilobytes. This is what stops a random byte with the
+            # PUBLISH nibble from swallowing the genuine packets queued behind it.
+            topic_end = header_end + 2 + topic_len
+            if len(stream) >= topic_end:
+                topic = bytes(stream[header_end + 2:topic_end]).decode("utf-8", errors="ignore")
+                if not is_reasonable_topic(topic):
+                    return False
+        return True
+
+    rule = _MQTT_TYPE_RULES.get(packet_type)
+    if rule is None:
+        return False
+    required_flags, min_remaining, max_remaining = rule
+    if (stream[0] & 0x0F) != required_flags:
+        return False
+    if remaining_len < min_remaining:
+        return False
+    if max_remaining >= 0 and remaining_len > max_remaining:
+        return False
     return True
 
 
@@ -181,7 +333,13 @@ def extract_mqtt_packets_from_stream(stream: bytearray) -> List[bytes]:
             del stream[0]
             continue
 
+        if not _header_is_plausible(stream, packet_type, remaining_len, header_end):
+            del stream[0]
+            continue
+
         if len(stream) < total_len:
+            # The header looks real, so this is a genuine partial packet: wait for
+            # the rest of the TCP stream rather than resynchronising.
             break
 
         packet = bytes(stream[:total_len])
@@ -248,11 +406,48 @@ def get_flow_state(flow_key: Tuple[str, int, str, int]) -> TcpFlowState:
         FLOW_STATES[flow_key] = state
         return state
 
-    if now - state.last_seen > STREAM_STALE_SECONDS:
+    if now - state.last_progress > STREAM_STALE_SECONDS:
         state.reset()
 
     state.last_seen = now
     return state
+
+
+def reset_flow(flow_key: Tuple[str, int, str, int], initial_seq: Optional[int] = None) -> None:
+    """Drop everything buffered for a flow, optionally seeding the next sequence.
+
+    Called on SYN so a reconnect that reuses the same socket pair does not inherit
+    the previous connection's next_seq and treat every segment as a giant gap.
+    """
+    state = FLOW_STATES.get(flow_key)
+    if state is None:
+        state = TcpFlowState()
+        FLOW_STATES[flow_key] = state
+    state.reset()
+    if initial_seq is not None:
+        state.next_seq = initial_seq % SEQ_MOD
+
+
+def drop_flow(flow_key: Tuple[str, int, str, int]) -> None:
+    """Forget a flow entirely. Called on FIN or RST."""
+    FLOW_STATES.pop(flow_key, None)
+
+
+def _resync_flow(state: TcpFlowState, flow_key: Tuple[str, int, str, int], reason: str) -> None:
+    """Give up on a gap that will never be filled and restart from what we hold.
+
+    A passive sniffer drops packets under kernel buffer pressure while the real
+    receiver got them and ACKed them, so no retransmission ever arrives. Without
+    this the flow parks segments forever and every sensor freezes.
+    """
+    if LOG_STREAM_EVENTS:
+        log_kv("[STREAM RESYNC]", flow=flow_key, reason=reason,
+               pending=len(state.pending), pending_bytes=state.pending_bytes)
+    state.stream.clear()
+    if state.pending:
+        state.next_seq = min(state.pending)
+    state.gap_since = None
+    state.last_progress = time.time()
 
 
 def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: bytes) -> List[bytes]:
@@ -267,8 +462,11 @@ def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: b
         if LOG_STREAM_EVENTS:
             log_kv("[STREAM INIT]", flow=flow_key, seq=seq, payload_len=len(payload))
 
-    if seq < state.next_seq:
-        overlap = state.next_seq - seq
+    # Sequence numbers are 32-bit and wrap. Plain < / > comparisons meant that after
+    # a wrap every arriving segment looked like a duplicate and the flow never
+    # advanced again.
+    if seq_lt(seq, state.next_seq):
+        overlap = seq_diff(state.next_seq, seq)
         if overlap >= len(payload):
             if LOG_STREAM_EVENTS:
                 log_kv("[STREAM DUPLICATE]", flow=flow_key, seq=seq, next_seq=state.next_seq, payload_len=len(payload))
@@ -278,23 +476,46 @@ def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: b
         payload = payload[overlap:]
         seq = state.next_seq
 
-    if seq > state.next_seq:
+    if seq_gt(seq, state.next_seq):
+        now = time.time()
         if seq not in state.pending:
             state.pending[seq] = payload
+            state.pending_bytes += len(payload)
+            if state.gap_since is None:
+                state.gap_since = now
             if LOG_STREAM_EVENTS:
                 log_kv("[STREAM GAP]", flow=flow_key, seq=seq, next_seq=state.next_seq, payload_len=len(payload), pending_count=len(state.pending))
                 log_payload_preview("[STREAM GAP PAYLOAD]", payload, flow=flow_key, seq=seq)
-        return packets
 
-    state.stream.extend(payload)
-    state.next_seq = seq + len(payload)
+        # A gap the sniffer missed is never retransmitted, because the real receiver
+        # got the segment and ACKed it. Bound the wait rather than parking forever.
+        if len(state.pending) > MAX_PENDING_SEGMENTS:
+            _resync_flow(state, flow_key, "pending_segments")
+        elif state.pending_bytes > MAX_PENDING_BYTES:
+            _resync_flow(state, flow_key, "pending_bytes")
+        elif state.gap_since is not None and (now - state.gap_since) > STREAM_GAP_TIMEOUT_SEC:
+            _resync_flow(state, flow_key, "gap_timeout")
+        else:
+            return packets
+
+        if state.next_seq is None or state.next_seq not in state.pending:
+            return packets
+
+    state.stream.extend(payload if seq == state.next_seq else b"")
+    if seq == state.next_seq:
+        state.next_seq = (seq + len(payload)) % SEQ_MOD
 
     while state.next_seq in state.pending:
         pending_payload = state.pending.pop(state.next_seq)
+        state.pending_bytes -= len(pending_payload)
         if LOG_STREAM_EVENTS:
             log_kv("[STREAM REASSEMBLE]", flow=flow_key, seq=state.next_seq, payload_len=len(pending_payload), pending_count=len(state.pending))
         state.stream.extend(pending_payload)
-        state.next_seq += len(pending_payload)
+        state.next_seq = (state.next_seq + len(pending_payload)) % SEQ_MOD
+
+    state.last_progress = time.time()
+    if not state.pending:
+        state.gap_since = None
 
     if len(state.stream) > MAX_STREAM_BUFFER:
         if LOG_STREAM_EVENTS:
@@ -305,19 +526,30 @@ def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: b
     return packets
 
 
-def sanitize_block_key(name: str) -> str:
-    slug = SLUG_RE.sub("_", name.strip().lower()).strip("_")
-    if not slug:
-        slug = "raw"
-    if slug[0].isdigit():
-        slug = f"b_{slug}"
-    return slug
-
-
 def _get_mqtt_publish():
     """Minimal deferred import — only for MQTT publish callables not available in state.py."""
     from . import mqtt
     return mqtt.publish_sensor_discovery, mqtt.publish_grouped_state
+
+
+def _write_state_cache(snapshot: Dict[str, object], now: Optional[float] = None) -> bool:
+    """Persist the state cache, at most once per STATE_CACHE_INTERVAL_SEC.
+
+    Throttling is not optional here. This runs on the scapy capture callback, and
+    adding fsync without it would make the hot path slower than the unsafe version it
+    replaces -- a slow flush stalls libpcap and drops segments.
+    """
+    global LAST_CACHE_WRITE_TS
+    now = now if now is not None else time.time()
+    if LAST_CACHE_WRITE_TS and (now - LAST_CACHE_WRITE_TS) < STATE_CACHE_INTERVAL_SEC:
+        return False
+    try:
+        _shared_state.atomic_write_json(STATE_CACHE_FILE, snapshot)
+        LAST_CACHE_WRITE_TS = now
+        return True
+    except Exception as exc:
+        log(f"[CACHE WRITE ERROR] {exc}", level="error")
+        return False
 
 
 def _log_debug_block(block_name: str, raw_text: str) -> None:
@@ -362,81 +594,149 @@ class SolarParser:
         return (power_w * dt_seconds) / 3_600_000.0
 
     @staticmethod
-    def _energy_dt_seconds(now_ts: float) -> float:
-        global LAST_ENERGY_TS
-        if LAST_ENERGY_TS is None:
-            LAST_ENERGY_TS = now_ts
+    def _energy_dt_seconds(domain: str, now_ts: float) -> float:
+        """Seconds since this domain last integrated, and advance its clock.
+
+        The first call for a domain establishes a baseline and returns 0 -- there is
+        no interval to integrate over yet.
+        """
+        global LAST_ENERGY_TS_BATTERY, LAST_ENERGY_TS_GRID
+
+        previous = LAST_ENERGY_TS_BATTERY if domain == "battery" else LAST_ENERGY_TS_GRID
+        if previous is None:
+            if domain == "battery":
+                LAST_ENERGY_TS_BATTERY = now_ts
+            else:
+                LAST_ENERGY_TS_GRID = now_ts
             return 0.0
 
-        dt_seconds = max(0.0, now_ts - LAST_ENERGY_TS)
-        LAST_ENERGY_TS = now_ts
-        # Bound dt so stale timestamps do not create unrealistic jumps.
+        dt_seconds = max(0.0, now_ts - previous)
+        if domain == "battery":
+            LAST_ENERGY_TS_BATTERY = now_ts
+        else:
+            LAST_ENERGY_TS_GRID = now_ts
+
+        # Bound dt so a stale timestamp cannot create an unrealistic jump.
         max_dt_seconds = max(float(UPDATE_INTERVAL_SEC) * 6.0, 60.0)
         return min(dt_seconds, max_dt_seconds)
 
     @staticmethod
+    def _battery_current(state: Dict[str, object], bms_key: str, legacy_key: str, factor: float):
+        """Pick a current source and put both on the same basis.
+
+        The BMS figures are whole-bank already, so they are used unscaled. The 2ONL
+        figures are per-inverter and are scaled by INVERTER_COUNT -- without that the
+        fallback silently switches basis mid-stream and steps the reported power.
+
+        Only the *fresh* payload is consulted. Reading the BMS value from the cache
+        meant a payload that carried a fresh 2ONL current still integrated an
+        arbitrarily old BMS one.
+        """
+        bms = SolarParser._to_float_or_none(state.get(bms_key))
+        legacy = SolarParser._to_float_or_none(state.get(legacy_key))
+
+        if bms is not None and legacy is not None and legacy > 0.01:
+            scaled_legacy = legacy * factor
+            bigger = max(bms, scaled_legacy)
+            smaller = min(bms, scaled_legacy)
+            if smaller > 0 and bigger / smaller > 2.0:
+                # No ground truth exists: the official app displays both and they
+                # disagree too. Surfacing it beats silently picking a winner.
+                log_kv(
+                    "[ENERGY SOURCE DISAGREEMENT]",
+                    level="warning",
+                    bms_key=bms_key,
+                    bms_value=bms,
+                    legacy_key=legacy_key,
+                    legacy_value=legacy,
+                    legacy_scaled=round(scaled_legacy, 2),
+                    using=bms_key,
+                )
+
+        if bms is not None:
+            return bms
+        if legacy is not None:
+            return legacy * factor
+        return None
+
+    @staticmethod
+    def _accumulate_kwh(state: Dict[str, object], key: str, power_w: float, dt_seconds: float) -> None:
+        previous = SolarParser._to_float_or_none(_shared_state.LAST_STATE.get(key)) or 0.0
+        total = previous + SolarParser._power_to_kwh_delta(power_w, dt_seconds)
+        # max() keeps the sensor monotonic for state_class: total_increasing. It is a
+        # floor, not protection -- the real guards are the input range checks and the
+        # freshness gates below.
+        state[key] = round(max(previous, total), 6)
+
+    @staticmethod
     def _apply_energy_dashboard_calculations(state: Dict[str, object], now_ts: Optional[float] = None) -> None:
+        """Derive the calculated power and energy sensors.
+
+        Battery and grid are gated independently. A combined gate would let a
+        grid-only payload through, find no battery current, and write
+        c_battery_charge_power_w = 0 -- flapping battery power to zero every time a
+        payload happened to omit the battery block.
+        """
         factor = max(0.0, float(INVERTER_COUNT))
         if factor <= 0:
             factor = 1.0
 
-        bat_v = SolarParser._to_float_or_none(state.get("bat_v", _shared_state.LAST_STATE.get("bat_v")))
-
-        charge_a = SolarParser._to_float_or_none(
-            state.get("bms_charging_current_a", _shared_state.LAST_STATE.get("bms_charging_current_a"))
-        )
-        if charge_a is None:
-            charge_a = SolarParser._to_float_or_none(
-                state.get("bat_charge_current", _shared_state.LAST_STATE.get("bat_charge_current"))
-            )
-
-        discharge_a = SolarParser._to_float_or_none(
-            state.get("bms_discharge_current_a", _shared_state.LAST_STATE.get("bms_discharge_current_a"))
-        )
-        if discharge_a is None:
-            discharge_a = SolarParser._to_float_or_none(
-                state.get("dischg_current", _shared_state.LAST_STATE.get("dischg_current"))
-            )
-
-        charge_power_w = 0.0
-        discharge_power_w = 0.0
-        if bat_v is not None and bat_v >= 0:
-            if charge_a is not None and charge_a > 0:
-                charge_power_w = bat_v * charge_a
-            if discharge_a is not None and discharge_a > 0:
-                discharge_power_w = bat_v * discharge_a
-
-        mains_signed_w = SolarParser._to_float_or_none(
-            state.get("mains_wdrr_value", _shared_state.LAST_STATE.get("mains_wdrr_value"))
-        )
-        grid_import_power_w = 0.0
-        if mains_signed_w is not None and mains_signed_w > 0:
-            grid_import_power_w = mains_signed_w * factor
-
-        state["c_battery_charge_power_w"] = int(round(charge_power_w))
-        state["c_battery_discharge_power_w"] = int(round(discharge_power_w))
-        state["c_grid_import_power_w"] = int(round(grid_import_power_w))
-
         now = now_ts if now_ts is not None else time.time()
-        dt_seconds = SolarParser._energy_dt_seconds(now)
 
-        prev_charge_kwh = SolarParser._to_float_or_none(
-            _shared_state.LAST_STATE.get("c_battery_charge_energy_kwh")
-        ) or 0.0
-        prev_discharge_kwh = SolarParser._to_float_or_none(
-            _shared_state.LAST_STATE.get("c_battery_discharge_energy_kwh")
-        ) or 0.0
-        prev_grid_import_kwh = SolarParser._to_float_or_none(
-            _shared_state.LAST_STATE.get("c_grid_import_energy_kwh")
-        ) or 0.0
+        battery_keys = (
+            "bat_v",
+            "bat_charge_current",
+            "dischg_current",
+            "bms_charging_current_a",
+            "bms_discharge_current_a",
+        )
+        if any(key in state for key in battery_keys):
+            # bat_v may legitimately come from the cache: it is slow-moving, and the
+            # block that carries it also carries the legacy currents.
+            bat_v = SolarParser._to_float_or_none(
+                state.get("bat_v", _shared_state.LAST_STATE.get("bat_v"))
+            )
+            charge_a = SolarParser._battery_current(
+                state, "bms_charging_current_a", "bat_charge_current", factor
+            )
+            discharge_a = SolarParser._battery_current(
+                state, "bms_discharge_current_a", "dischg_current", factor
+            )
 
-        charge_kwh = prev_charge_kwh + SolarParser._power_to_kwh_delta(charge_power_w, dt_seconds)
-        discharge_kwh = prev_discharge_kwh + SolarParser._power_to_kwh_delta(discharge_power_w, dt_seconds)
-        grid_import_kwh = prev_grid_import_kwh + SolarParser._power_to_kwh_delta(grid_import_power_w, dt_seconds)
+            charge_power_w = 0.0
+            discharge_power_w = 0.0
+            if bat_v is not None and bat_v >= 0:
+                if charge_a is not None and charge_a > 0:
+                    charge_power_w = bat_v * charge_a
+                if discharge_a is not None and discharge_a > 0:
+                    discharge_power_w = bat_v * discharge_a
 
-        state["c_battery_charge_energy_kwh"] = round(max(prev_charge_kwh, charge_kwh), 6)
-        state["c_battery_discharge_energy_kwh"] = round(max(prev_discharge_kwh, discharge_kwh), 6)
-        state["c_grid_import_energy_kwh"] = round(max(prev_grid_import_kwh, grid_import_kwh), 6)
+            state["c_battery_charge_power_w"] = int(round(charge_power_w))
+            state["c_battery_discharge_power_w"] = int(round(discharge_power_w))
+
+            dt_seconds = SolarParser._energy_dt_seconds("battery", now)
+            SolarParser._accumulate_kwh(state, "c_battery_charge_energy_kwh", charge_power_w, dt_seconds)
+            SolarParser._accumulate_kwh(
+                state, "c_battery_discharge_energy_kwh", discharge_power_w, dt_seconds
+            )
+
+            if BATTERY_CAPACITY_PER_BATTERY_AH > 0:
+                state["c_bms_total_capacity_ah"] = round(
+                    BATTERY_COUNT * BATTERY_CAPACITY_PER_BATTERY_AH, 1
+                )
+
+        if "mains_wdrr_value" in state:
+            mains_signed_w = SolarParser._to_float_or_none(state.get("mains_wdrr_value"))
+            grid_import_power_w = 0.0
+            if mains_signed_w is not None and mains_signed_w > 0:
+                grid_import_power_w = mains_signed_w * factor
+
+            state["c_grid_import_power_w"] = int(round(grid_import_power_w))
+
+            dt_seconds = SolarParser._energy_dt_seconds("grid", now)
+            SolarParser._accumulate_kwh(
+                state, "c_grid_import_energy_kwh", grid_import_power_w, dt_seconds
+            )
 
     @staticmethod
     def _safe_b64decode(value: str) -> Optional[bytes]:
@@ -721,37 +1021,46 @@ class SolarParser:
 
     @staticmethod
     def _parse_cell_list(tokens: List[str]) -> Dict[str, object]:
+        """Decode the per-cell voltage list.
+
+        Stops at the first out-of-range token rather than skipping it. Skipping
+        silently renumbered every later cell -- a collapsed cell 3 made cell_3_mv
+        report physical cell 4's voltage, which is exactly backwards from what the
+        reading is for.
+
+        The min/max/delta summary is deliberately NOT derived here. This block
+        carries at most 16 cells while the pack may be larger (a 32-cell bank was
+        observed reporting its minimum at position 32), so any summary computed from
+        this list describes a subset. uxJp carries the BMS's own whole-bank summary
+        and is the sole writer of those keys.
+        """
         state: Dict[str, object] = {}
         cell_values: List[int] = []
 
         for tok in tokens:
             val = SolarParser._to_int(tok)
-            if val is not None and 2000 <= val <= 5000:
-                cell_values.append(val)
+            if val is None or not (2000 <= val <= 5000):
+                break
+            cell_values.append(val)
 
         if not cell_values:
             return state
 
-        cell_values = cell_values[:16]
         state["bms_cell_count"] = len(cell_values)
+        if len(cell_values) > 16:
+            log(
+                f"[CELLS] {len(cell_values)} cells reported but only 16 entities exist; "
+                f"cells 17-{len(cell_values)} are not published",
+                level="warning",
+            )
 
-        for idx, mv in enumerate(cell_values, start=1):
+        for idx, mv in enumerate(cell_values[:16], start=1):
             state[f"cell_{idx}_mv"] = mv
 
-        min_mv = min(cell_values)
-        max_mv = max(cell_values)
-        min_pos = cell_values.index(min_mv) + 1
-        max_pos = cell_values.index(max_mv) + 1
-
-        state["bms_min_cell_mv"] = min_mv
-        state["bms_max_cell_mv"] = max_mv
-        state["bms_min_cell_pos"] = min_pos
-        state["bms_max_cell_pos"] = max_pos
-        state["bms_cell_delta_mv"] = max_mv - min_mv
         return state
 
     @staticmethod
-    def _apply_dynamic_debug(state: Dict[str, object], parsed: Dict[str, Tuple[str, List[str]]]) -> None:
+    def _apply_dynamic_debug(parsed: Dict[str, Tuple[str, List[str]]]) -> None:
         for block_name, (raw_text, _tokens) in parsed.items():
             _log_debug_block(block_name, raw_text)
 
@@ -760,7 +1069,7 @@ class SolarParser:
         state: Dict[str, object] = {}
         parsed = {name: SolarParser._parse_ascii_text(data) for name, data in blocks.items()}
 
-        SolarParser._apply_dynamic_debug(state, parsed)
+        SolarParser._apply_dynamic_debug(parsed)
 
         # Info / identity
         if "SUCV" in parsed:
@@ -799,7 +1108,7 @@ class SolarParser:
 
         if len(vals) >= 5:
             load_pct = SolarParser._to_int(vals[4])
-            if load_pct is not None and 0 <= load_pct <= 100:
+            if load_pct is not None and 0 <= load_pct <= 200:
                 state["load_pct"] = load_pct
 
         if len(vals) >= 6:
@@ -815,12 +1124,9 @@ class SolarParser:
             if inductor_current is not None:
                 state["inductor_current_a"] = round(inductor_current, 1)
 
-        if len(vals) >= 9:
-            dc_rect_temp = SolarParser._to_float(vals[8])
-            if dc_rect_temp is not None:
-                if dc_rect_temp > 100:
-                    dc_rect_temp /= 10.0
-                state["dc_rectification_temperature_c"] = round(dc_rect_temp, 1)
+        # vals[8] was previously decoded as dc_rectification_temperature_c with a
+        # `if > 100: /= 10` rescale, which turned the live value 01175 into 117.5 C.
+        # V4W3 carries the same reading unscaled and is the sole writer now.
 
         # Grid / mains -> WdRR
         vals = list(parsed.get("WdRR", ("", []))[1])
@@ -868,7 +1174,9 @@ class SolarParser:
 
         if len(vals) >= 9:
             state["wdrr_status_bits"] = vals[8]
-            state["main_output_relay_status"] = "On" if vals[8].startswith("1") else None
+            state["main_output_relay_status"] = SolarParser._decode_yes_no_digit(
+                vals[8][:1], yes_word="On", no_word="Off"
+            )
 
         if len(vals) >= 10:
             state["mains_input_range_code"] = vals[9]
@@ -1014,7 +1322,7 @@ class SolarParser:
                 state["pv2_temp"] = round(pv2_temp, 1)
         if len(vals) >= 10:
             dc_rect_temp = SolarParser._to_float(vals[9])
-            if dc_rect_temp is not None:
+            if dc_rect_temp is not None and 0 <= dc_rect_temp <= 150:
                 state["dc_rectification_temperature_c"] = round(dc_rect_temp, 1)
 
         # Generic computed PV total
@@ -1040,7 +1348,9 @@ class SolarParser:
             maybe_turn_off_soc = SolarParser._to_int(vals[2])
             if maybe_turn_off_soc is not None:
                 state["parallel_mode_turn_off_soc"] = maybe_turn_off_soc
-                state["grid_connected_current_a"] = maybe_turn_off_soc
+                # This token is a state-of-charge percentage. It used to also be
+                # written to grid_connected_current_a, which is declared in amps.
+                # 93VQ[17] is the real grid current and is the sole writer now.
         if len(vals) >= 4:
             maybe_turn_off_v = SolarParser._to_float(vals[3])
             if maybe_turn_off_v is not None:
@@ -1085,11 +1395,9 @@ class SolarParser:
             sec_delay = SolarParser._format_min_token(vals[13])
             if sec_delay is not None:
                 state["second_delay_time"] = sec_delay
-        if len(vals) >= 15:
-            mains_slot = SolarParser._format_hour_token(vals[14])
-            if mains_slot is not None:
-                state["mains_charging_starting_time"] = mains_slot
-                state["mains_charging_ending_time"] = mains_slot
+        # vals[14] was previously written to BOTH mains_charging_starting_time and
+        # mains_charging_ending_time -- one token cannot be two different times.
+        # 93VQ[18] and 93VQ[19] carry them separately and are the sole writers now.
         if len(vals) >= 16:
             second_batt_v = SolarParser._to_float(vals[15])
             if second_batt_v is not None:
@@ -1177,46 +1485,19 @@ class SolarParser:
                 state["mains_charging_starting_time"] = start_time
             if end_time is not None:
                 state["mains_charging_ending_time"] = end_time
-        if len(vals) >= 5 and vals[3] == "13310110230" and vals[4] == "011":
-            state.setdefault("output_model", "PAL")
-            state.setdefault("mode", "Battery Mode")
-            state.setdefault("pv_energy_feeding_priority", "LBU")
-            state.setdefault("pv_grid_connection_agreement", "3")
-            state.setdefault("charging_main_switch", "Open")
-            state.setdefault("charging_light_status", "Flicker")
-            state.setdefault("inverter_light_status", "Light")
-            state.setdefault("warning_light_status", "Off")
-            state.setdefault("lcd_back_lighting", "On")
-            state.setdefault("li_battery_activation_function_switch", "Close")
-            state.setdefault("li_battery_activation_process", "Stop")
-            state.setdefault("low_battery_alarm", "No")
-            state.setdefault("machine_over_temperature", "No")
-            state.setdefault("input_voltage_too_high", "No")
-            state.setdefault("mppt_constant_temperature_mode", "Disable")
-            state.setdefault("over_temperature_restart_function", "Open")
-            state.setdefault("overload_restart_function", "Close")
-            state.setdefault("overload_to_bypass_function", "Close")
-            state.setdefault("overloaded", "No")
-            state.setdefault("mains_light_status", "Flicker")
-            state.setdefault("eeprom_data_abnormality", "No")
-            state.setdefault("eeprom_read_write_exception", "No")
-            state.setdefault("abnormal_fan_speed", "No")
-            state.setdefault("abnormal_low_pv_power", "No")
-            state.setdefault("abnormal_temperature_sensor", "No")
-
         # Yavb (BMS/status rich block)
         vals = parsed.get("Yavb", ("", []))[1]
-        if len(vals) >= 1:
-            sc = SolarParser._to_int(vals[0])
-            if sc is not None:
-                state["bat_series_count"] = sc
+        # vals[0] duplicates bat_series_count, which 2ONL already provides via the
+        # strict integer parser. 2ONL is the battery block and is the sole writer.
         if len(vals) >= 2:
             state["yavb_flags_raw"] = vals[1]
         if len(vals) >= 3:
             v = SolarParser._to_float(vals[2])
             if v is not None:
+                # This token is the BMS discharge cut-off. It was also written to
+                # low_electric_lock_voltage_v, which 93VQ[16] carries as a separate
+                # user setting; 93VQ is the sole writer of that key now.
                 state["bms_discharge_voltage_limit_v"] = round(v, 1)
-                state["low_electric_lock_voltage_v"] = round(v, 1)
         if len(vals) >= 4:
             v = SolarParser._to_float(vals[3])
             if v is not None:
@@ -1232,9 +1513,9 @@ class SolarParser:
         if len(vals) >= 8:
             charge_or_temp = SolarParser._to_float(vals[6])
             discharge = SolarParser._to_float(vals[7])
-            if charge_or_temp is not None:
+            if charge_or_temp is not None and 0 <= charge_or_temp <= 300:
                 state["bms_charging_current_a"] = round(charge_or_temp, 1)
-            if discharge is not None:
+            if discharge is not None and 0 <= discharge <= 300:
                 state["bms_discharge_current_a"] = round(discharge, 1)
         if len(vals) >= 9:
             state["yavb_code_raw"] = vals[8]
@@ -1244,21 +1525,6 @@ class SolarParser:
             bms_avg_temp = SolarParser._to_float(vals[10])
             if bms_avg_temp is not None and -50.0 <= bms_avg_temp <= 150.0:
                 state["bms_avg_temp_c"] = round(bms_avg_temp, 2)
-
-        flags_raw = state.get("yavb_flags_raw")
-        if flags_raw == "1001100000000000":
-            state.setdefault("bms_allow_charging_flag", "Yes")
-            state.setdefault("bms_allow_discharge_flag", "Yes")
-            state.setdefault("bms_communication_normal", "Yes")
-            state.setdefault("bms_communication_control_function", "Open")
-            state.setdefault("bms_charging_overcurrent_sign", "No")
-            state.setdefault("bms_discharge_overcurrent_flag", "No")
-            state.setdefault("bms_low_battery_alarm_flag", "No")
-            state.setdefault("bms_low_power_fault_flag", "No")
-            state.setdefault("bms_low_temperature_flag", "No")
-            state.setdefault("bms_temperature_too_high_flag", "No")
-            state.setdefault("battery_not_connected", "No")
-            state.setdefault("battery_voltage_higher", "No")
 
         # eo8w (status/config rich block)
         vals = parsed.get("eo8w", ("", []))[1]
@@ -1272,32 +1538,6 @@ class SolarParser:
         eo8w_code = SolarParser._extract_alpha_code(parsed.get("eo8w", ("", []))[0])
         if eo8w_code:
             state["mains_eo8w_code"] = eo8w_code
-
-        if state.get("eo8w_flags_raw") == "B0100000000000" and state.get("eo8w_blob_raw") == "20211002110B117020000":
-            state.setdefault("charging_main_switch", "Open")
-            state.setdefault("charging_light_status", "Flicker")
-            state.setdefault("inverter_light_status", "Light")
-            state.setdefault("warning_light_status", "Off")
-            state.setdefault("automatic_return_to_first_page", "On")
-            state.setdefault("buzzer_function", "On")
-            state.setdefault("lcd_back_lighting", "On")
-            state.setdefault("li_battery_activation_function_switch", "Close")
-            state.setdefault("li_battery_activation_process", "Stop")
-            state.setdefault("abnormal_fan_speed", "No")
-            state.setdefault("abnormal_low_pv_power", "No")
-            state.setdefault("abnormal_temperature_sensor", "No")
-            state.setdefault("input_voltage_too_high", "No")
-            state.setdefault("low_battery_alarm", "No")
-            state.setdefault("machine_over_temperature", "No")
-            state.setdefault("battery_equalization_mode", "Disable")
-            state.setdefault("mppt_constant_temperature_mode", "Disable")
-            state.setdefault("over_temperature_restart_function", "Open")
-            state.setdefault("overload_restart_function", "Close")
-            state.setdefault("overload_to_bypass_function", "Close")
-            state.setdefault("overloaded", "No")
-            state.setdefault("mains_light_status", "Flicker")
-            state.setdefault("eeprom_data_abnormality", "No")
-            state.setdefault("eeprom_read_write_exception", "No")
 
         # COST energies
         vals = parsed.get("COST", ("", []))[1]
@@ -1321,8 +1561,17 @@ class SolarParser:
             state["battery_status"] = "Charge"
         elif isinstance(discharge_a, (int, float)) and float(discharge_a) > 0.01:
             state["battery_status"] = "Discharge"
-        elif state.get("battery_status") is None and state.get("mains_current_flow_direction") == "Mains To Inverter":
-            state["battery_status"] = "Charge"
+        elif (
+            isinstance(charge_a, (int, float))
+            and isinstance(discharge_a, (int, float))
+            and float(charge_a) <= 0.01
+            and float(discharge_a) <= 0.01
+        ):
+            # Both currents are known and effectively zero: that is arithmetic, not
+            # inference. Previously this branch keyed off mains_current_flow_direction
+            # instead, so a payload carrying only the grid block -- no battery data at
+            # all -- reported "Charge".
+            state["battery_status"] = "Idle"
 
         # Compatibility with older entity names / expectations.
         if "inverter_temperature_c" in state:
@@ -1343,13 +1592,13 @@ class SolarParser:
             state["bulk_v"] = state["return_to_mains_mode_voltage_v"]
         if state.get("mains_current_flow_direction") is not None:
             state["mains_flow_state"] = state["mains_current_flow_direction"]
-        if "battery_type" not in state and _shared_state.LAST_STATE.get("battery_type") is None and "Yavb" in parsed:
-            state["battery_type"] = "LIA"
+        # battery_type is decoded from the 2ONL block only (see above). It was
+        # previously defaulted to "LIA" whenever a Yavb block was present, which
+        # guessed the pack chemistry from the mere existence of a block.
 
-        if BATTERY_CAPACITY_PER_BATTERY_AH > 0:
-            total_capacity = round(BATTERY_COUNT * BATTERY_CAPACITY_PER_BATTERY_AH, 1)
-            state["c_bms_total_capacity_ah"] = total_capacity
-
+        # c_bms_total_capacity_ah is written inside the battery branch of the energy
+        # calculation, so that a payload carrying no battery data at all produces an
+        # empty state dict rather than a handful of derived-from-nothing values.
         SolarParser._apply_energy_dashboard_calculations(state)
 
         return state
@@ -1423,8 +1672,10 @@ class SolarParser:
                         hex_preview=blocks[block_name][:64].hex(),
                     )
 
-            if not blocks and LOG_UNPARSED_PUBLISH:
-                log_payload_preview("[UNPARSED PAYLOAD: NO BLOCKS]", payload_bytes, topic=source_topic)
+            if not blocks:
+                if LOG_UNPARSED_PUBLISH:
+                    log_payload_preview("[UNPARSED PAYLOAD: NO BLOCKS]", payload_bytes, topic=source_topic)
+                return False
 
             state = SolarParser._try_ascii_schema(blocks)
             if state:
@@ -1451,26 +1702,24 @@ class SolarParser:
                 if LOG_CLEAN_STATE:
                     log_kv("[CLEAN STATE]", topic=source_topic, values=clean_state)
 
-                _shared_state.LAST_STATE.update(clean_state)
+                # One merge, one snapshot, both under the lock. Everything downstream
+                # works from the snapshot so nothing iterates a dict the capture
+                # thread may resize underneath it.
+                snapshot = _shared_state.update_state(clean_state)
+                _shared_state.LAST_TELEMETRY_TS = time.time()
 
-                # Persist state cache to survive container restarts
-                try:
-                    os.makedirs(os.path.dirname(STATE_CACHE_FILE), exist_ok=True)
-                    with open(STATE_CACHE_FILE, "w") as _sf:
-                        json.dump(dict(_shared_state.LAST_STATE), _sf)
-                except Exception as _cache_exc:
-                    log(f"[CACHE WRITE ERROR] {_cache_exc}", level="error")
+                _write_state_cache(snapshot)
 
                 unresolved_debug = []
                 if LOG_NULL_TARGETS:
                     for key in IMPORTANT_DEBUG_KEYS:
-                        if _shared_state.LAST_STATE.get(key) is None:
+                        if snapshot.get(key) is None:
                             unresolved_debug.append(key)
                     if unresolved_debug:
                         log_kv("[UNRESOLVED TARGETS]", topic=source_topic, keys=unresolved_debug, block_names=sorted(blocks.keys()))
 
                 if LOG_STATE_SNAPSHOT:
-                    log_kv("[STATE SNAPSHOT]", topic=source_topic, values=_shared_state.LAST_STATE)
+                    log_kv("[STATE SNAPSHOT]", topic=source_topic, values=snapshot)
 
                 if _shared_state.DISCOVERY_PUBLISHED:
                     # Publish discovery for any late-bound raw block sensors.
@@ -1478,11 +1727,27 @@ class SolarParser:
                         if key in SENSORS and key not in _shared_state.PUBLISHED_SENSOR_KEYS:
                             publish_sensor_discovery(key)
 
-                    global LAST_PUBLISH_TS
+                    global LAST_PUBLISH_TS, PENDING_PUBLISH
                     now = time.time()
-                    if len(changed_keys) > 0 or (now - LAST_PUBLISH_TS) >= UPDATE_INTERVAL_SEC:
-                        publish_grouped_state(_shared_state.LAST_STATE)
+                    if changed_keys:
+                        PENDING_PUBLISH = True
+
+                    elapsed = now - LAST_PUBLISH_TS
+                    # A change is deferred to the end of the throttle window, never
+                    # dropped -- the previous `or` meant any change published
+                    # immediately, so UPDATE_INTERVAL_SEC could never throttle
+                    # anything and the option did nothing at all.
+                    due = PENDING_PUBLISH and elapsed >= UPDATE_INTERVAL_SEC
+                    # Heartbeat: republish even with nothing to say, so a genuinely
+                    # steady inverter cannot sit silent long enough for expire_after
+                    # to mark every entity unavailable.
+                    heartbeat_sec = max(UPDATE_INTERVAL_SEC, EXPIRE_AFTER_SEC // 3) if EXPIRE_AFTER_SEC else 0
+                    stale = bool(heartbeat_sec) and elapsed >= heartbeat_sec
+
+                    if due or stale:
+                        publish_grouped_state(snapshot)
                         LAST_PUBLISH_TS = now
+                        PENDING_PUBLISH = False
 
                 log_kv(
                     f"[{datetime.now().strftime('%H:%M:%S')}] Published to HA",

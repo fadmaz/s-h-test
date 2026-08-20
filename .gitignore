@@ -28,3 +28,9 @@ wheels/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Test artifacts
+.coverage
+coverage.xml
+.pytest_cache/
+.ruff_cache/

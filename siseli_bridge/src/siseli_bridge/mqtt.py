@@ -5,10 +5,13 @@ import paho.mqtt.client as mqtt
 
 from . import state as _state
 from .config import *
-from .loggers import log
-from .sensors import SENSORS, get_group_title, get_grouped_sensor_keys, get_sensor_group
-
-RUNNING = True
+from .loggers import log, log_error_always
+from .sensors import (
+    SENSOR_GROUP_TITLES,
+    SENSORS,
+    get_group_title,
+    get_sensor_group,
+)
 
 _SECTION_PREFIXES = (
     "Device Info - ",
@@ -108,7 +111,11 @@ def publish_sensor_discovery(key: str) -> None:
         "unique_id": f"{group_device_id}_{key}",
         "state_topic": state_topic_for_group(group),
         "value_template": f"{{{{ value_json.{key} }}}}",
-        "availability_topic": availability_topic_for_group(group),
+        # Every entity points at the single last-will topic. paho supports exactly
+        # one will, so per-group availability meant a broker-detected disconnect
+        # marked only the 12 main-group entities unavailable while the other ~191
+        # kept showing their last values as though they were live.
+        "availability_topic": AVAILABILITY_TOPIC,
         "payload_available": "online",
         "payload_not_available": "offline",
         "device": device_info(group),
@@ -125,6 +132,10 @@ def publish_sensor_discovery(key: str) -> None:
         payload["entity_category"] = meta["entity_category"]
     if "enabled_by_default" in meta:
         payload["enabled_by_default"] = bool(meta["enabled_by_default"])
+    if EXPIRE_AFTER_SEC:
+        # Backstop for the watchdog itself dying. Every publish rewrites all groups
+        # from one snapshot, so no group can expire while telemetry is flowing.
+        payload["expire_after"] = EXPIRE_AFTER_SEC
 
     client.publish(topic, json.dumps(payload), retain=True)
     _state.PUBLISHED_SENSOR_KEYS.add(key)
@@ -134,15 +145,113 @@ def publish_discovery() -> None:
     for key in sorted(SENSORS.keys()):
         publish_sensor_discovery(key)
 
-    for group in get_grouped_sensor_keys():
-        client.publish(availability_topic_for_group(group), "online", retain=True)
+    publish_availability(True)
     _state.DISCOVERY_PUBLISHED = True
     log("[HA MQTT] Discovery published", level="info")
 
 
+def publish_availability(online: bool) -> None:
+    """Set the single availability topic that every entity references."""
+    client.publish(AVAILABILITY_TOPIC, "online" if online else "offline", retain=True)
+
+
+def stale_discovery_topics(device_id=None) -> set:
+    """Discovery topics this configuration will never publish to again.
+
+    A key's group is baked into both the discovery topic and the unique_id, so when
+    the grouping changed (v2.5.21 moved the calculated sensors onto the main device)
+    the old retained config stayed on the broker and Home Assistant kept the orphan
+    entity alive alongside the new one, frozen at its last value.
+
+    Scope is deliberately narrow: regrouping orphans only. Every sensor that is still
+    declared keeps its config, including the ones with no decode path.
+    """
+    target = device_id or DEVICE_ID
+    # Built from the real mapping: "main" maps to the bare device id, so a literal
+    # "<id>_main" is a topic no version has ever written and must not be swept.
+    group_ids = {
+        target if group == "main" else "%s_%s" % (target, group)
+        for group in SENSOR_GROUP_TITLES
+    }
+    candidates = {
+        "%s/sensor/%s/%s/config" % (MQTT_DISCOVERY_PREFIX, gid, key)
+        for key in SENSORS
+        for gid in group_ids
+    }
+    if target != DEVICE_ID:
+        return candidates
+    live = {
+        "%s/sensor/%s/%s/config"
+        % (MQTT_DISCOVERY_PREFIX, device_id_for_group(get_sensor_group(key)), key)
+        for key in SENSORS
+    }
+    return candidates - live
+
+
+def _read_discovery_marker() -> Dict[str, object]:
+    try:
+        with open(DISCOVERY_MARKER_FILE, "r") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def cleanup_stale_discovery() -> int:
+    """Clear retained discovery configs orphaned by a regrouping or a rename.
+
+    Idempotent and gated by a marker file so it runs once rather than on every
+    reconnect. The marker lives outside state.json, because that file is merged
+    wholesale into LAST_STATE at boot and any key added here would be republished as
+    though it were a sensor reading.
+    """
+    if not DISCOVERY_CLEANUP or _state.DISCOVERY_CLEANED:
+        return 0
+
+    marker = _read_discovery_marker()
+    previous_id = marker.get("device_id")
+    already_done = (
+        marker.get("schema") == 1
+        and previous_id == DEVICE_ID
+        and marker.get("discovery_prefix") == MQTT_DISCOVERY_PREFIX
+    )
+    if already_done:
+        _state.DISCOVERY_CLEANED = True
+        return 0
+
+    topics = stale_discovery_topics()
+    if previous_id and previous_id != DEVICE_ID:
+        topics |= stale_discovery_topics(previous_id)
+
+    # Availability topics from before every entity shared one.
+    legacy_availability = {
+        availability_topic_for_group(group) for group in SENSOR_GROUP_TITLES
+    } - {AVAILABILITY_TOPIC}
+
+    for topic in sorted(topics) + sorted(legacy_availability):
+        client.publish(topic, "", retain=True)
+
+    try:
+        _state.atomic_write_json(
+            DISCOVERY_MARKER_FILE,
+            {
+                "schema": 1,
+                "device_id": DEVICE_ID,
+                "discovery_prefix": MQTT_DISCOVERY_PREFIX,
+            },
+        )
+    except Exception as exc:
+        log("[HA MQTT] Could not record discovery cleanup marker: %s" % exc, level="warning")
+
+    _state.DISCOVERY_CLEANED = True
+    cleared = len(topics) + len(legacy_availability)
+    log("[HA MQTT] Cleared %d stale discovery topics" % cleared, level="info")
+    return cleared
+
+
 def publish_grouped_state(state_payload: Dict[str, object]) -> None:
     grouped_state: Dict[str, Dict[str, object]] = {}
-    for key, value in state_payload.items():
+    for key, value in list(state_payload.items()):
         group = get_sensor_group(key)
         grouped_state.setdefault(group, {})[key] = value
 
@@ -151,20 +260,31 @@ def publish_grouped_state(state_payload: Dict[str, object]) -> None:
 
 
 def on_connect(_client, _userdata, _flags, rc, _properties=None):
-    code = int(rc) if rc is not None else -1
-    if code == 0:
-        log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}", level="info")
-        publish_discovery()
-        if any(v is not None for v in _state.LAST_STATE.values()):
-            publish_grouped_state(_state.LAST_STATE)
-    else:
-        log(f"[HA MQTT ERROR] Connection failed with rc={code}", level="error")
+    # paho does not suppress callback exceptions: anything escaping here propagates
+    # out of loop_forever and kills the network thread, after which publish() queues
+    # into a dead loop and the bridge goes silent with nothing in the log.
+    try:
+        code = int(rc) if rc is not None else -1
+        if code == 0:
+            log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}", level="info")
+            cleanup_stale_discovery()
+            publish_discovery()
+            snapshot = _state.snapshot_state()
+            if any(v is not None for v in snapshot.values()):
+                publish_grouped_state(snapshot)
+        else:
+            log(f"[HA MQTT ERROR] Connection failed with rc={code}", level="error")
+    except Exception as exc:
+        log_error_always(f"[HA MQTT ERROR] on_connect failed: {exc}")
 
 
 def on_disconnect(_client, _userdata, rc, _properties=None):
-    code = int(rc) if rc is not None else -1
-    if code != 0 and RUNNING:
-        log(f"[HA MQTT] Disconnected (rc={code}), retrying...", level="warning")
+    try:
+        code = int(rc) if rc is not None else -1
+        if code != 0 and _state.RUNNING:
+            log(f"[HA MQTT] Disconnected (rc={code}), retrying...", level="warning")
+    except Exception as exc:
+        log_error_always(f"[HA MQTT ERROR] on_disconnect failed: {exc}")
 
 
 client.on_connect = on_connect

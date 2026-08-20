@@ -1,0 +1,30 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Add-on version
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Add-on log
+      description: |
+        Settings -> Add-ons -> Siseli Inverter Bridge -> Log. Scrub the `topic=` values
+        if present; they contain your device serial.
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Please remove your MQTT password.
+      render: yaml

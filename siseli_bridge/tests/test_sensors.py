@@ -1,14 +1,11 @@
 import unittest
-import sys
-import os
 
 # Add parent directory to path to allow importing src
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.siseli_bridge.sensors import (
     SENSORS,
+    UNDECODED_SENSOR_KEYS,
     SENSOR_GROUP_TITLES,
-    MAIN_SENSOR_KEYS,
     get_group_title,
     get_grouped_sensor_keys,
     get_sensor_group,
@@ -119,6 +116,40 @@ class TestSensors(unittest.TestCase):
         for key in calculated_keys:
             with self.subTest(key=key):
                 self.assertEqual(get_sensor_group(key), "main")
+
+class TestUndecodableSensors(unittest.TestCase):
+    """These sensors only ever held values invented by hardcoded presets. They stay
+    declared so a future real decode reuses the same unique_id, but they must not be
+    enabled on a fresh install."""
+
+    def test_every_undecodable_key_exists_and_is_disabled(self):
+        for key in sorted(UNDECODED_SENSOR_KEYS):
+            with self.subTest(key=key):
+                self.assertIn(key, SENSORS)
+                self.assertIs(SENSORS[key].get("enabled_by_default"), False)
+
+    def test_the_list_covers_the_fault_indicators_and_bms_flags(self):
+        for key in (
+            "mode", "overloaded", "machine_over_temperature", "low_battery_alarm",
+            "bms_temperature_too_high_flag", "bms_communication_normal",
+            "battery_not_connected", "util_chg",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, UNDECODED_SENSOR_KEYS)
+
+    def test_decoded_sensors_are_not_in_the_list(self):
+        for key in ("bat_v", "grid_v", "load_w", "bms_current_soc", "yavb_flags_raw"):
+            with self.subTest(key=key):
+                self.assertNotIn(key, UNDECODED_SENSOR_KEYS)
+
+    def test_configured_capacity_is_named_as_a_configuration_echo(self):
+        """It is BATTERY_COUNT x BATTERY_CAPACITY_PER_BATTERY_AH, not a BMS reading,
+        and it sat next to bms_nominal_ah contradicting it 2x on a live install."""
+        self.assertEqual(
+            SENSORS["c_bms_total_capacity_ah"]["name"],
+            "Battery Status - Configured Battery Bank Capacity",
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

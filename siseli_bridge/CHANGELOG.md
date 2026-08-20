@@ -4,6 +4,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-08-20
+
+### Fixed
+
+- **Options The UI Accepted But The Add-on Rejected**: Port numbers, MAC addresses, the discovery prefix and the update interval are now bounded in the add-on schema to exactly what the code enforces, so an invalid value is reported on the options page instead of leaving the add-on in a restart loop.
+- **Device ID No Longer Drove Nothing**: `STATE_TOPIC` and `AVAILABILITY_TOPIC` shipped literal defaults naming `siseli_inverter_1`, so Supervisor always supplied them and changing `DEVICE_ID` did not move the topics. Both now default to blank and are derived from the device id; an explicitly set topic still wins.
+- **Invalid MQTT Topics Are Rejected**: A topic containing `+` or `#` is a protocol violation that makes the broker close the connection, which the client then retries in a loop. Startup validation now catches it.
+
+### Added
+
+- **Debug Flags**: A single multi-select option replaces ten diagnostic switches that had no add-on option at all, so from the UI they were previously either all on (via `LOG_LEVEL: debug`) or all off. It is now possible to enable just `unparsed_publish`, which is what an unsupported inverter needs, without also turning on the per-packet trace.
+- **Issue Templates**: Reporting an unsupported inverter now asks for the debug capture whose block lines become test fixtures, and reminds the reporter to scrub the cloud topic, which contains their device serial.
+
+### Changed
+
+- **Verbose Logging Is Off By Default**: `LOG_VERBOSE` shipped enabled and was documented as deprecated in the same breath, so a fresh installation wrote a log line for every captured frame without anyone asking. It is now ignored entirely, with a deprecation warning, and will be removed in 2.7.0. Use `DEBUG_FLAGS` with `xray` (every frame) or `packets` (reassembled MQTT packets).
+- **Interception Documentation Corrected**: The README described a DNS-override method that cannot work -- the bridge observes traffic rather than terminating it, so there is no listener for a redirected connection to reach. It is replaced by the requirements a router-side redirect actually has, and by switch port mirroring, which needs no code at all and is the right answer for networks that block ARP interception.
+- **`LISTEN_PORT` Removed**: It was exported, validated and described in the UI as the port the add-on listens on. Nothing ever opened a socket; its only consumer was a startup log line.
+- **One Changelog**: `siseli_bridge/CHANGELOG.md` is canonical. The root file, which duplicated it by hand and had already drifted, now points at it.
+
+### Removed
+
+- **Dead Code**: `sanitize_block_key` had no call sites, and `_apply_dynamic_debug` took a state parameter it never touched.
+
+## [2.6.0] - 2026-08-20
+
+### Fixed
+
+- **Removed Fabricated Sensor Presets**: Deleted three hardcoded blocks that filled in ~37 sensors whenever a raw value matched one specific inverter's settings. Twelve BMS alarm flags (`bms_temperature_too_high_flag`, `bms_communication_normal` and others) and eight fault indicators (`overloaded`, `machine_over_temperature`, `low_battery_alarm`, `input_voltage_too_high`, `eeprom_data_abnormality`, `abnormal_fan_speed` and others) were constants in the source, not readings, and were structurally incapable of ever reporting a fault. They now report `unknown` until a real decode exists.
+- **Fabricated Battery Type And Charge Status**: `battery_type` was set to `LIA` merely because a `Yavb` block was present, and `battery_status` reported `Charge` from a payload carrying no battery data at all. `battery_status` now also reports `Idle` when both currents are known and zero.
+- **Sensor Value Collisions**: Six keys had two writers and the last block parsed won. `dc_rectification_temperature_c` decoded to 117.5 C from one block and 51.0 C from another; `grid_connected_current_a` was receiving a state-of-charge percentage into a sensor declared in amps; one `dHrK` token was written to both the charging start and end time. Each now has a single writer.
+- **Main Output Relay Off State**: `main_output_relay_status` could only ever read `On` -- the off case produced a null that was stripped before publishing.
+- **Overload Percentage Visibility**: `load_pct` above 100 % was discarded, so an overloaded inverter kept showing its last normal reading.
+- **Cell Index Alignment**: A cell voltage outside the valid range was skipped rather than stopping the run, silently renumbering every later cell so `cell_3_mv` reported physical cell 4.
+- **BMS Cell Summary Source**: The min/max/delta summary is taken from the BMS's own whole-bank figures instead of being recomputed from the 16 cells this block carries, which described only part of a larger pack.
+- **Energy Calculation Freshness**: The calculated power and energy sensors are gated per domain and only run on payloads that actually carry the inputs. A payload with no battery data used to publish a changed battery energy total, integrating a cached current indefinitely.
+- **Energy Counter Poisoning**: `bms_charging_current_a` and `bms_discharge_current_a` are range-checked like every other current. Unbounded input multiplied by voltage and accumulated into a `total_increasing` sensor could never be corrected downward.
+- **Energy Fallback Scaling**: The inverter-reported current fallback is scaled by `INVERTER_COUNT` like every other calculated sensor, instead of silently switching basis when the BMS block was absent.
+- **Publish Interval Enforcement**: `UPDATE_INTERVAL_SEC` now actually throttles. The previous condition published on any change, so the option never suppressed anything despite being documented as saving database storage. Changes inside the window are deferred, never dropped.
+- **Unparsed Payload Detection**: A payload with no recognised blocks now reports failure. Every payload previously reported success because the calculated sensors were always written, which also made the unparsed-payload diagnostics unreachable.
+- **Availability Coverage**: Every entity now watches the bridge's last-will topic. Previously availability was published per sensor group, but MQTT allows one will, so a broker disconnect marked only the twelve main-group entities unavailable while the other ~191 kept showing their last values as though they were live.
+- **Stale Value Detection**: Availability is driven by the age of the last decoded reading, with an `expire_after` backstop on every discovery payload. Nothing previously aged a value out, so a bridge that stopped receiving data left every sensor frozen at its last reading indefinitely.
+- **MQTT Thread Safety**: Shared state is snapshotted under a lock, and exceptions inside the MQTT callbacks are contained. A dictionary resize during a reconnect could raise inside a paho callback and silently kill the network thread, after which the add-on kept parsing and logging while publishing nothing.
+- **Stream Reassembly Recovery**: Out-of-order segments are capped and time-limited, and a stalled flow resynchronises instead of waiting forever. A single segment the sniffer missed used to stop all sensor updates permanently, because the real receiver had already acknowledged it so no retransmission ever came.
+- **Sequence Wraparound**: TCP sequence numbers are compared with serial arithmetic, so a 32-bit wrap no longer makes every subsequent segment look like a duplicate.
+- **Connection Lifecycle**: SYN, FIN and RST are honoured, so a reconnect reusing the same socket pair no longer inherits the previous connection's sequence state.
+- **Frame Validation**: Non-PUBLISH MQTT packets are validated per control type, with reserved flag bits, exact lengths and minimal length encoding enforced. After any desync the parser previously accepted arbitrary bytes as frames and consumed the genuine telemetry queued behind them.
+- **State Cache Integrity**: `/data/state.json` is written atomically and no more than once every 30 seconds. A kill mid-write left invalid JSON, which the loader turned into an empty state, silently zeroing every cumulative energy counter.
+- **Shutdown Restores ARP**: Stopping the add-on now sends corrective ARP replies to both the inverter and the router. Both caches previously stayed poisoned until they aged out, leaving the inverter unable to reach the cloud for that whole window.
+- **MAC Learning**: The bridge recognises its own re-emitted frames and records learned addresses only after the identity check, so it no longer reports its own MAC as both an inverter and a router address.
+- **Device Identifier Validation**: `DEVICE_ID` is sanitised for Home Assistant's discovery matcher, which accepts only letters, digits, underscores and hyphens. A value containing a space previously created zero entities with nothing logged anywhere; a `+` or `#` caused the broker to close the connection in a retry loop. Case is preserved, so every working identifier is unchanged.
+
+### Added
+
+- **Sensor Expiry**: New `EXPIRE_AFTER_SEC` option (default 600). Sensors are republished on a heartbeat well inside this window so a steady inverter cannot look stale.
+- **Reset Calculated Energy Counters**: New `RESET_ENERGY_COUNTERS` option zeroes the calculated energy totals on the next start, for installations whose counters were inflated by the bug above. Turn on, restart once, turn off.
+- **Energy Source Disagreement Warning**: When the BMS and inverter both report a battery current and they differ by more than 2x, the bridge logs both instead of silently picking one. There is no ground truth -- the official app displays both and they disagree too.
+- **Corrupt Counter Detection**: Invalid or negative energy counters in the cached state are dropped on load rather than restored.
+- **Test Infrastructure**: Added shared test helpers and real captured inverter blocks as fixtures, first-ever coverage for `mqtt.py` and `core.py`, packaging and option-wiring guards, and `ruff` linting. Coverage rose from 52 % to 80 %.
+- **Automatic Discovery Cleanup**: Stale retained discovery topics left by earlier sensor groupings are cleared on the first start, so the manual broker cleanup previously documented in the README is no longer needed. Controlled by `DISCOVERY_CLEANUP`.
+- **Telemetry Timeout**: New `TELEMETRY_TIMEOUT_SEC` option (default 180) sets how long without a decoded reading before sensors are marked unavailable.
+- **Optional Full Traffic Forwarding**: New `FORWARD_ALL_INVERTER_TRAFFIC` option relays inverter traffic other than broker data, such as DNS and NTP, which ARP interception otherwise blackholes. Off by default.
+- **Dropped Packet Visibility**: The health line reports non-broker inverter packets that were dropped, broken down by protocol and port, so the option above can be judged from evidence.
+
+### Changed
+
+- **Configured Capacity Naming**: `c_bms_total_capacity_ah` is now "Configured Battery Bank Capacity". It echoes `BATTERY_COUNT` x `BATTERY_CAPACITY_PER_BATTERY_AH`, and read as a BMS measurement it contradicted the BMS's own reported capacity.
+- **Undecodable Sensors Disabled By Default**: The 38 sensors with no decode path are marked disabled so they no longer clutter a fresh installation. They stay declared, so a future decode reuses the same entity.
+- **Packaging Metadata Corrected**: `pip install .` works; the declared build backend did not exist and the package list was missing, which produced an empty wheel.
+
 ## [2.5.24] - 2026-03-30
 
 ### Fixed

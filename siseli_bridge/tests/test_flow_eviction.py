@@ -1,9 +1,6 @@
-import os
-import sys
 import time
 import unittest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.siseli_bridge.parsers import (
     FLOW_STATES,
@@ -59,7 +56,10 @@ class TestFlowEviction(unittest.TestCase):
         key = self._key()
         state = get_flow_state(key)
         state.next_seq = 9999
-        state.last_seen = time.time() - 200  # stale
+        # The reset keys off last_progress, not last_seen. Using last_seen meant a
+        # flow wedged behind a missing segment kept itself alive indefinitely,
+        # because parking a segment counts as activity.
+        state.last_progress = time.time() - 200
 
         fresh = get_flow_state(key)  # should call state.reset()
 
