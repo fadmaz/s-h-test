@@ -31,6 +31,17 @@ python -m coverage report --fail-under=78
 python -m coverage report --include="*/siseli_bridge/mqtt.py,*/siseli_bridge/core.py" --fail-under=65
 ```
 
+A smoke test starts the built image and waits for it to report a running sniffer:
+
+```bash
+bash scripts/smoke-test.sh
+```
+
+Run it before releasing. Two releases shipped broken because "the image builds" and
+"the tests pass" were both true of an add-on that could not start: the startup banner
+lives in the `__main__` body that no test executes, in a file carrying a ruff `F405`
+exemption. Only starting the container catches that class of fault.
+
 `ruff check` runs a deliberately narrow, defect-only rule set (pyflakes, bugbear,
 syntax errors). There is no formatter and none is wanted: reformatting would rewrite
 ~2,500 lines in one commit and destroy `git blame` on the parser, which is where the
