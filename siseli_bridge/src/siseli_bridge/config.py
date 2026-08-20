@@ -123,6 +123,10 @@ LOG_UNPARSED_PUBLISH = _debug("unparsed_publish")
 LOG_STREAM_EVENTS = _debug("stream_events")
 LOG_NULL_TARGETS = _debug("null_targets")
 
+#: The flags actually in effect. Public on purpose: `from .config import *` skips
+#: any name beginning with an underscore, so a consumer cannot call _debug().
+ACTIVE_DEBUG_FLAGS = tuple(name for name in DEBUG_FLAG_NAMES if _debug(name))
+
 #: Deprecated. Kept in the schema so Supervisor does not reject stored options, but
 #: deliberately ignored -- honouring it would preserve the per-packet output it was
 #: meant to remove. Removed entirely in 2.7.0.

@@ -447,6 +447,26 @@ def shutdown(*_args) -> None:
     log("[Bridge] Stopped")
 
 
+def log_startup_configuration() -> None:
+    """Print the effective configuration.
+
+    A module-level function rather than inline in __main__, so a test can
+    execute it. This block previously used a private helper that
+    `from .config import *` does not export, and the resulting NameError was
+    unreachable by any test because nothing ran the __main__ body.
+    """
+    log(f"--- Siseli Inverter Bridge {VERSION} ---")
+    log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
+    log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
+    log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT}")
+    log(f"[Config] INVERTER_COUNT={INVERTER_COUNT}")
+    log(f"[Config] BATTERY_COUNT={BATTERY_COUNT} BATTERY_CAPACITY_PER_BATTERY_AH={BATTERY_CAPACITY_PER_BATTERY_AH}")
+    log(f"[Config] DEVICE_NAME={DEVICE_NAME} MANUFACTURER={MANUFACTURER}")
+    log(f"[Config] STATE_TOPIC={STATE_TOPIC}")
+    log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
+    log(f"[Config] DEBUG_FLAGS={list(ACTIVE_DEBUG_FLAGS) or 'none'}")
+
+
 def install_signal_handlers() -> None:
     """Called from __main__ only. At module scope this would hijack the signal
     handlers of any process that merely imports core (e.g. the test runner), and
@@ -460,17 +480,7 @@ if __name__ == "__main__":
     validate_config()
     install_signal_handlers()
     load_cached_state()
-    log(f"--- Siseli Inverter Bridge {VERSION} ---")
-    log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
-    log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
-    log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT}")
-    log(f"[Config] INVERTER_COUNT={INVERTER_COUNT}")
-    log(f"[Config] BATTERY_COUNT={BATTERY_COUNT} BATTERY_CAPACITY_PER_BATTERY_AH={BATTERY_CAPACITY_PER_BATTERY_AH}")
-    log(f"[Config] DEVICE_NAME={DEVICE_NAME} MANUFACTURER={MANUFACTURER}")
-    log(f"[Config] STATE_TOPIC={STATE_TOPIC}")
-    log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
-    active_flags = [name for name in DEBUG_FLAG_NAMES if _debug(name)]
-    log(f"[Config] DEBUG_FLAGS={active_flags or 'none'}")
+    log_startup_configuration()
 
     for key in SENSORS.keys():
         _state.LAST_STATE.setdefault(key, None)

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.3] - 2026-08-20
+
+### Fixed
+
+- **Add-on Crash-Looped On Start**: 2.6.2 raised `NameError: name '_debug' is not defined` before the sniffer started, restarting continuously without ever publishing. `from .config import *` does not import names beginning with an underscore, so the private helper the startup banner called was never available. The computed flag list is now exported as `ACTIVE_DEBUG_FLAGS`.
+
+### Added
+
+- **Startup Path Coverage**: The startup banner was inline in the `__main__` body, which no test executes, so the crash shipped with a passing suite and a clean lint run. It is now a module-level function with tests that run it, plus a check that no module referencing `from .config import *` uses a private name from that module. `ruff` could not have caught this: `core.py` carries an `F405` exemption because the star import is load-bearing, and `F405` is the rule that would have flagged it.
+
 ## [2.6.2] - 2026-08-20
 
 ### Fixed
