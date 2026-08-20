@@ -324,5 +324,73 @@ class TestPublishThrottle(unittest.TestCase):
         self.publish_state.assert_not_called()
 
 
+class TestBatteryStatusMatchesReportedPower(_ParserTestCase):
+    """battery_status used to come from the inverter's own ammeter while the power
+    sensors came from the BMS. On a live installation the two disagreed: the status
+    read "Idle" in the same publish that reported 344 W flowing into the battery.
+
+    It is now derived from the calculated power, so the contradiction is impossible
+    rather than merely unlikely.
+    """
+
+    def _resolve(self, state, count=2):
+        with mock.patch("src.siseli_bridge.parsers.INVERTER_COUNT", count):
+            SolarParser._apply_energy_dashboard_calculations(state, now_ts=1.0)
+            SolarParser._derive_battery_status(state)
+        return state
+
+    def test_the_live_case_that_reported_idle_while_charging(self):
+        """Values taken verbatim from a running installation."""
+        state = self._resolve({
+            "bat_v": 53.7,
+            "bat_charge_current": 0.0,      # the inverter's ammeter
+            "dischg_current": 0.0,
+            "bms_charging_current_a": 6.4,  # the BMS
+            "bms_discharge_current_a": 0.0,
+        })
+        self.assertEqual(state["c_battery_charge_power_w"], 344)
+        self.assertEqual(state["battery_status"], "Charge")
+
+    def test_status_and_power_can_never_contradict(self):
+        for label, inputs, expected in (
+            ("idle", {"bat_v": 53.7, "bat_charge_current": 0.0, "dischg_current": 0.0}, "Idle"),
+            ("charging", {"bat_v": 53.7, "bat_charge_current": 5.0, "dischg_current": 0.0}, "Charge"),
+            ("discharging", {"bat_v": 53.7, "bat_charge_current": 0.0, "dischg_current": 10.0}, "Discharge"),
+        ):
+            with self.subTest(case=label):
+                state = self._resolve(dict(inputs))
+                status = state["battery_status"]
+                charge = state["c_battery_charge_power_w"]
+                discharge = state["c_battery_discharge_power_w"]
+                self.assertEqual(status, expected)
+                if status == "Charge":
+                    self.assertGreater(charge, 0)
+                elif status == "Discharge":
+                    self.assertGreater(discharge, 0)
+                else:
+                    self.assertEqual((charge, discharge), (0, 0))
+
+    def test_no_battery_data_means_no_status(self):
+        state = self._resolve({"mains_wdrr_value": 100})
+        self.assertNotIn("battery_status", state)
+
+    def test_one_source_reading_zero_is_reported(self):
+        """A ratio test cannot express this, and it is the most informative
+        disagreement there is -- it is what produced the Idle-while-charging case."""
+        state = {"bat_v": 53.7, "bat_charge_current": 0.0, "bms_charging_current_a": 6.4}
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            SolarParser._apply_energy_dashboard_calculations(state, now_ts=1.0)
+        tags = [call.args[0] for call in logged.call_args_list if call.args]
+        self.assertIn("[ENERGY SOURCE DISAGREEMENT]", tags)
+
+    def test_agreeing_sources_stay_quiet(self):
+        state = {"bat_v": 53.7, "bat_charge_current": 3.0, "bms_charging_current_a": 6.0}
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            with mock.patch("src.siseli_bridge.parsers.INVERTER_COUNT", 2):
+                SolarParser._apply_energy_dashboard_calculations(state, now_ts=1.0)
+        tags = [call.args[0] for call in logged.call_args_list if call.args]
+        self.assertNotIn("[ENERGY SOURCE DISAGREEMENT]", tags)
+
+
 if __name__ == "__main__":
     unittest.main()

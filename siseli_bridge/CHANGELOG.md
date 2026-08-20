@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.4] - 2026-08-20
+
+### Fixed
+
+- **Battery Status Contradicted The Power Reading**: `battery_status` was derived from the inverter's own ammeter while the calculated power sensors used the BMS. On a live installation the two disagreed in the same publish -- the status read `Idle` alongside 344 W flowing into the battery. It is now derived from the calculated power, so the two cannot contradict each other.
+- **Disagreement Warning Missed The Clearest Case**: `[ENERGY SOURCE DISAGREEMENT]` compared the two current sources by ratio, which cannot express one source reading zero while the other reports current -- exactly the case that produced the contradiction above. It now reports that too.
+
 ### Added
 
 - **Container Smoke Test**: CI now starts the built image and waits for it to report a running sniffer, failing if the process exits first. Two releases shipped broken because a passing test suite and a successful image build were both consistent with an add-on that could not start.
