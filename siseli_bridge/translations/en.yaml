@@ -85,7 +85,7 @@ configuration:
     description: 'Throttles how often data states are pushed to Home Assistant. Raising this will significantly save database storage (Default: 10 seconds).'
   EXPIRE_AFTER_SEC:
     name: 'Sensor Expiry (Seconds)'
-    description: 'How long a sensor keeps its last value before Home Assistant marks it unavailable. This is what stops stale readings looking live if the bridge stops receiving data. Must be larger than Update Throttling. Set 0 to disable (Default: 600).'
+    description: 'How long a sensor keeps its last value before Home Assistant marks it unavailable. This is what stops stale readings looking live if the bridge stops receiving data. Must be larger than Update Throttling and than Telemetry Timeout. Inverters report every few minutes, so this is measured in minutes, not seconds. Set 0 to disable (Default: 1800).'
   RESET_ENERGY_COUNTERS:
     name: 'Reset Calculated Energy Counters'
     description: 'Zeroes the calculated battery and grid energy totals on the next start. These are total_increasing sensors, so an inflated value can never correct itself downward. Turn on, restart once, then turn off again.'

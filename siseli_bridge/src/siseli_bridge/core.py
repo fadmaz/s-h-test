@@ -23,7 +23,7 @@ from scapy.all import (  # type: ignore
 
 from .config import *
 from .loggers import log, log_kv, log_payload_preview
-from .sensors import SENSORS
+from .sensors import SENSORS, UNDECODED_SENSOR_KEYS
 from . import state as _state
 from .mqtt import client, publish_availability, start_mqtt
 from .parsers import (
@@ -32,7 +32,9 @@ from .parsers import (
     append_stream_data,
     drop_flow,
     extract_publish_payload,
+    heartbeat_due,
     mqtt_type_name,
+    republish_state,
     reset_flow,
 )
 from .version import __version__ as VERSION
@@ -89,6 +91,20 @@ def load_cached_state(path: str = STATE_CACHE_FILE) -> None:
                     cached.pop(key, None)
             if dropped:
                 log(f"[CACHE] Dropped invalid energy counters: {', '.join(dropped)}", level="warning")
+
+            # Values the parser can no longer produce. Without this they survive in
+            # the cache indefinitely and are republished on every start, so removing
+            # a fabricated sensor from the code does not remove it from anyone's
+            # dashboard.
+            stale = [key for key in UNDECODED_SENSOR_KEYS if cached.get(key) is not None]
+            for key in stale:
+                cached.pop(key, None)
+            if stale:
+                log(
+                    f"[CACHE] Discarded {len(stale)} cached values with no decode path "
+                    f"(e.g. {', '.join(sorted(stale)[:3])}); they will read unknown",
+                    level="warning",
+                )
 
             if RESET_ENERGY_COUNTERS:
                 for key in ENERGY_COUNTER_KEYS:
@@ -369,6 +385,15 @@ def health_logger() -> None:
             availability_watchdog_tick()
         except Exception as exc:
             log(f"[HEALTH ERROR] {exc}", level="error")
+
+        try:
+            # Timer-driven, so the retained state stays fresh while the inverter is
+            # quiet. Doing this from parse_payload meant it could only fire when a
+            # payload arrived, which is exactly when it was not needed.
+            if heartbeat_due():
+                republish_state()
+        except Exception as exc:
+            log(f"[HEARTBEAT ERROR] {exc}", level="error")
 
         ticks += 1
         if ticks % 3:

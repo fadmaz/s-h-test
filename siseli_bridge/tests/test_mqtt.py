@@ -294,7 +294,7 @@ class TestAvailabilityAndIdentity(_MqttTestCase):
         self.assertTrue(configs)
         for topic, payload in configs.items():
             with self.subTest(topic=topic):
-                self.assertEqual(payload["expire_after"], 600)
+                self.assertEqual(payload["expire_after"], mqtt_mod.EXPIRE_AFTER_SEC)
 
 
 if __name__ == "__main__":
