@@ -1,5 +1,10 @@
 # Contributing
 
+`CLAUDE.md` is the companion to this file: it covers the architecture, the decoding
+model, and the traps that have caused real broken releases. This file covers setup,
+conventions and process. Keep both current — a stale entry in either is worse than
+none, because it is trusted.
+
 ## Development setup
 
 ```bash
