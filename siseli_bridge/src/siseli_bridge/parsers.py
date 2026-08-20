@@ -532,6 +532,36 @@ def _get_mqtt_publish():
     return mqtt.publish_sensor_discovery, mqtt.publish_grouped_state
 
 
+def heartbeat_due(now: Optional[float] = None) -> bool:
+    """Whether the retained state is old enough to be worth republishing.
+
+    This has to be driven by a timer, not by an arriving payload: the whole point is
+    to keep Home Assistant's expire_after window fresh while the inverter is quiet,
+    and a payload-driven heartbeat cannot fire precisely when it is needed. Measured
+    on real hardware, telemetry arrives every 300 s and can gap to 600 s.
+    """
+    if not EXPIRE_AFTER_SEC:
+        return False
+    now = now if now is not None else time.time()
+    interval = max(UPDATE_INTERVAL_SEC, EXPIRE_AFTER_SEC // 3)
+    return (now - LAST_PUBLISH_TS) >= interval
+
+
+def republish_state(now: Optional[float] = None) -> bool:
+    """Republish the retained state so it does not age out. Returns True if sent."""
+    global LAST_PUBLISH_TS, PENDING_PUBLISH
+    if not _shared_state.DISCOVERY_PUBLISHED:
+        return False
+    snapshot = _shared_state.snapshot_state()
+    if not snapshot:
+        return False
+    _, publish_grouped_state = _get_mqtt_publish()
+    publish_grouped_state(snapshot)
+    LAST_PUBLISH_TS = now if now is not None else time.time()
+    PENDING_PUBLISH = False
+    return True
+
+
 def _write_state_cache(snapshot: Dict[str, object], now: Optional[float] = None) -> bool:
     """Persist the state cache, at most once per STATE_CACHE_INTERVAL_SEC.
 
@@ -1751,13 +1781,8 @@ class SolarParser:
                     # immediately, so UPDATE_INTERVAL_SEC could never throttle
                     # anything and the option did nothing at all.
                     due = PENDING_PUBLISH and elapsed >= UPDATE_INTERVAL_SEC
-                    # Heartbeat: republish even with nothing to say, so a genuinely
-                    # steady inverter cannot sit silent long enough for expire_after
-                    # to mark every entity unavailable.
-                    heartbeat_sec = max(UPDATE_INTERVAL_SEC, EXPIRE_AFTER_SEC // 3) if EXPIRE_AFTER_SEC else 0
-                    stale = bool(heartbeat_sec) and elapsed >= heartbeat_sec
 
-                    if due or stale:
+                    if due:
                         publish_grouped_state(snapshot)
                         LAST_PUBLISH_TS = now
                         PENDING_PUBLISH = False

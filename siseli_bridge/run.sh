@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
-echo "--- Siseli Inverter Bridge 2.6.4 ---"
+echo "--- Siseli Inverter Bridge 2.6.5 ---"
 
 export MQTT_HOST="$(bashio::config 'MQTT_HOST' 'core-mosquitto')"
 export MQTT_PORT="$(bashio::config 'MQTT_PORT' '1883')"
@@ -31,10 +31,10 @@ export DEBUG_FLAGS="$(bashio::config 'DEBUG_FLAGS' '' | tr '\n' ',')"
 export ENTITY_PREFIX="$(bashio::config 'ENTITY_PREFIX' 'Siseli')"
 export LOG_LEVEL="$(bashio::config 'LOG_LEVEL' 'info')"
 export UPDATE_INTERVAL_SEC="$(bashio::config 'UPDATE_INTERVAL_SEC' '10')"
-export EXPIRE_AFTER_SEC="$(bashio::config 'EXPIRE_AFTER_SEC' '600')"
+export EXPIRE_AFTER_SEC="$(bashio::config 'EXPIRE_AFTER_SEC' '1800')"
 export RESET_ENERGY_COUNTERS="$(bashio::config 'RESET_ENERGY_COUNTERS' 'false')"
 export DISCOVERY_CLEANUP="$(bashio::config 'DISCOVERY_CLEANUP' 'true')"
-export TELEMETRY_TIMEOUT_SEC="$(bashio::config 'TELEMETRY_TIMEOUT_SEC' '180')"
+export TELEMETRY_TIMEOUT_SEC="$(bashio::config 'TELEMETRY_TIMEOUT_SEC' '1800')"
 export FORWARD_ALL_INVERTER_TRAFFIC="$(bashio::config 'FORWARD_ALL_INVERTER_TRAFFIC' 'false')"
 export MQTT_RETAIN="$(bashio::config 'MQTT_RETAIN' 'true')"
 export INVERTER_COUNT="$(bashio::config 'INVERTER_COUNT' '1')"

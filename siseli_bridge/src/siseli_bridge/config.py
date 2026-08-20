@@ -66,10 +66,10 @@ AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", "").strip() or f"siseli/{DE
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 
 UPDATE_INTERVAL_SEC = int(os.getenv("UPDATE_INTERVAL_SEC", "10"))
-EXPIRE_AFTER_SEC = int(os.getenv("EXPIRE_AFTER_SEC", "600"))
+EXPIRE_AFTER_SEC = int(os.getenv("EXPIRE_AFTER_SEC", "1800"))
 RESET_ENERGY_COUNTERS = os.getenv("RESET_ENERGY_COUNTERS", "false").strip().lower() in {"1", "true", "yes", "on"}
 DISCOVERY_CLEANUP = os.getenv("DISCOVERY_CLEANUP", "true").strip().lower() in {"1", "true", "yes", "on"}
-TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "180"))
+TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "1800"))
 FORWARD_ALL_INVERTER_TRAFFIC = os.getenv("FORWARD_ALL_INVERTER_TRAFFIC", "false").strip().lower() in {"1", "true", "yes", "on"}
 MQTT_RETAIN = os.getenv("MQTT_RETAIN", "true").strip().lower() in {"1", "true", "yes", "on"}
 LOG_LEVEL_STR = os.getenv("LOG_LEVEL", "info").strip().lower()
@@ -177,6 +177,13 @@ def validate_config() -> None:
 
     if TELEMETRY_TIMEOUT_SEC < 30:
         errors.append(f"TELEMETRY_TIMEOUT_SEC must be >= 30, got {TELEMETRY_TIMEOUT_SEC}")
+
+    if EXPIRE_AFTER_SEC and TELEMETRY_TIMEOUT_SEC > EXPIRE_AFTER_SEC:
+        errors.append(
+            f"TELEMETRY_TIMEOUT_SEC ({TELEMETRY_TIMEOUT_SEC}) must not exceed "
+            f"EXPIRE_AFTER_SEC ({EXPIRE_AFTER_SEC}); Home Assistant would expire the "
+            f"sensors before the bridge decided they were stale"
+        )
 
     if EXPIRE_AFTER_SEC < 0:
         errors.append(f"EXPIRE_AFTER_SEC must be >= 0, got {EXPIRE_AFTER_SEC}")

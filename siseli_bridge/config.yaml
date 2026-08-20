@@ -1,6 +1,6 @@
 name: 'Siseli Inverter Bridge'
 description: 'Local bridge for Siseli-compatible inverters with MQTT discovery for Home Assistant.'
-version: '2.6.4'
+version: '2.6.5'
 slug: 'siseli_bridge'
 url: 'https://github.com/fadmaz/siseli-ha/blob/main/README.md'
 init: false
@@ -46,10 +46,10 @@ options:
   DEBUG_FLAGS: []
   LOG_LEVEL: 'info'
   UPDATE_INTERVAL_SEC: 10
-  EXPIRE_AFTER_SEC: 600
+  EXPIRE_AFTER_SEC: 1800
   RESET_ENERGY_COUNTERS: false
   DISCOVERY_CLEANUP: true
-  TELEMETRY_TIMEOUT_SEC: 180
+  TELEMETRY_TIMEOUT_SEC: 1800
   FORWARD_ALL_INVERTER_TRAFFIC: false
   MQTT_RETAIN: true
 

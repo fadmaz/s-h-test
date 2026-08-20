@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.5] - 2026-08-20
+
+### Fixed
+
+- **Every Sensor Flapped To Unavailable And Back**: `TELEMETRY_TIMEOUT_SEC` shipped at 180 seconds while inverters report every 300 seconds, with gaps of 600 observed. The watchdog therefore fired before every single payload, so all sensors cycled to Unavailable and back continuously. Both it and `EXPIRE_AFTER_SEC` now default to 1800 seconds, and startup validation rejects a timeout longer than the expiry window.
+- **The Heartbeat Could Not Fire When It Was Needed**: The republish that keeps Home Assistant's expiry window fresh ran inside the payload parser, so it only happened when a payload arrived -- precisely when it was not required. It is now driven by the watchdog timer and runs regardless of inverter traffic.
+- **Fabricated Values Survived In The State Cache**: Removing the hardcoded sensor presets in 2.6.0 stopped the bridge generating them but left the ones already written to `/data/state.json`, which were restored and republished on every start. On a live installation `mode` still read `Battery Mode` three releases after the code that invented it was deleted. Cached values with no decode path are now discarded on load and reported.
+
+### Added
+
+- **Test Environment Drift Guard**: The test suite's stand-in for Supervisor's options is now asserted to match the shipped defaults. It had drifted, which made the flapping bug above appear fixed or broken depending on test order.
+
 ## [2.6.4] - 2026-08-20
 
 ### Fixed

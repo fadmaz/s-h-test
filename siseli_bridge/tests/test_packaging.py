@@ -313,5 +313,39 @@ class TestShippedDefaultsSatisfyTheSchema(unittest.TestCase):
                 )
 
 
+class TestTestEnvironmentMatchesShippedDefaults(unittest.TestCase):
+    """tests/helpers.py BASE_ENV stands in for the options Supervisor supplies. When
+    it drifts from config.yaml, any test that reloads config silently runs against a
+    value nobody ships -- which made a genuine availability-flapping bug look fixed
+    depending on test order."""
+
+    def test_base_env_matches_config_yaml(self):
+        from tests.helpers import BASE_ENV
+
+        options = _load_yaml(ADDON / "config.yaml")["options"]
+        for key, shipped in sorted(options.items()):
+            if key not in BASE_ENV:
+                continue  # list-valued options are represented differently
+            with self.subTest(option=key):
+                expected = shipped
+                if isinstance(shipped, bool):
+                    expected = str(shipped).lower()
+                elif isinstance(shipped, list):
+                    continue
+                self.assertEqual(
+                    BASE_ENV[key],
+                    str(expected),
+                    f"BASE_ENV has {BASE_ENV[key]!r} but the add-on ships {shipped!r}",
+                )
+
+    def test_every_shipped_option_is_represented(self):
+        from tests.helpers import BASE_ENV
+
+        options = set(_load_yaml(ADDON / "config.yaml")["options"])
+        self.assertEqual(
+            options - set(BASE_ENV), set(), "an option the add-on ships is missing from BASE_ENV"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

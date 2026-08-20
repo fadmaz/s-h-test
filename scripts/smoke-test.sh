@@ -41,7 +41,7 @@ docker run -d --name "$CONTAINER" \
     -e DEVICE_NAME="Siseli Inverter 1" -e MODEL_NAME="Siseli Inverter 1" \
     -e MANUFACTURER="Siseli Compatible" -e ENTITY_PREFIX=Siseli \
     -e INVERTER_COUNT=1 -e BATTERY_COUNT=1 -e BATTERY_CAPACITY_PER_BATTERY_AH=0.0 \
-    -e LOG_LEVEL=info -e UPDATE_INTERVAL_SEC=10 -e EXPIRE_AFTER_SEC=600 \
+    -e LOG_LEVEL=info \
     -e MQTT_RETAIN=true \
     --entrypoint python3 "$IMAGE" -u -m src.siseli_bridge.core >/dev/null
 

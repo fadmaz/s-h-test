@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from src.siseli_bridge import core
+from src.siseli_bridge import parsers as parser_module
 from src.siseli_bridge import state as shared_state
 from tests.captures import CAPTURE_TELEMETRY
 from tests.helpers import FakeMqttClient, envelope, inverter_packet, isolated_state, publish_packet, tcp_segments
@@ -475,6 +476,165 @@ class TestStartupPath(unittest.TestCase):
                         r"(?<![\w.])_" + re.escape(name) + r"",
                         f"_{name} is private to config.py and is not exported by the star import",
                     )
+
+
+class TestAvailabilityAtRealCadence(unittest.TestCase):
+    """The availability timeout shipped at 180 s while the inverter reports every
+    300 s, with an observed 600 s gap. It therefore fired before every single payload
+    -- every entity flapped to Unavailable and back, permanently, on every install.
+
+    The measured cadence is the fixture: a default that cannot survive it is wrong.
+    """
+
+    #: Publish times observed on real hardware, in seconds from an arbitrary zero.
+    OBSERVED_GAPS = (300, 300, 300, 301, 300, 600)
+
+    def setUp(self):
+        ctx = isolated_state()
+        ctx.__enter__()
+        self.addCleanup(lambda: ctx.__exit__(None, None, None))
+        self._online = core._AVAILABILITY_ONLINE
+        self.addCleanup(lambda: setattr(core, "_AVAILABILITY_ONLINE", self._online))
+
+    def _flaps_at(self, timeout):
+        """Replay the observed cadence and count availability transitions."""
+        transitions = []
+        now = 1000.0
+        core._AVAILABILITY_ONLINE = True
+        shared_state.LAST_TELEMETRY_TS = now
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=timeout), mock.patch(
+            "src.siseli_bridge.core.publish_availability"
+        ), mock.patch("src.siseli_bridge.core.log"):
+            for gap in self.OBSERVED_GAPS:
+                # Tick every 10 s across the gap, as the watchdog thread does.
+                for step in range(10, gap + 1, 10):
+                    result = core.availability_watchdog_tick(now + step)
+                    if result is not None:
+                        transitions.append(result)
+                now += gap
+                shared_state.LAST_TELEMETRY_TS = now
+        return transitions
+
+    def test_the_shipped_default_survives_the_observed_cadence(self):
+        from src.siseli_bridge import config as cfg
+
+        self.assertEqual(
+            self._flaps_at(cfg.TELEMETRY_TIMEOUT_SEC),
+            [],
+            "the default timeout must not mark sensors unavailable at the cadence a "
+            "real inverter actually reports",
+        )
+
+    def test_the_old_default_flapped_on_every_payload(self):
+        """Documents why 180 s was wrong, so it is not chosen again."""
+        self.assertTrue(self._flaps_at(180), "180s is expected to flap at this cadence")
+
+    def test_a_genuine_stall_is_still_detected(self):
+        from src.siseli_bridge import config as cfg
+
+        core._AVAILABILITY_ONLINE = True
+        shared_state.LAST_TELEMETRY_TS = 1000.0
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=cfg.TELEMETRY_TIMEOUT_SEC), \
+             mock.patch("src.siseli_bridge.core.publish_availability"), \
+             mock.patch("src.siseli_bridge.core.log"):
+            stalled = core.availability_watchdog_tick(1000.0 + cfg.TELEMETRY_TIMEOUT_SEC + 1)
+        self.assertIs(stalled, False, "a real stall must still be reported")
+
+
+class TestHeartbeatIsTimerDriven(unittest.TestCase):
+    """The heartbeat republish lived inside parse_payload, so it could only fire when
+    a payload arrived -- precisely when it was not needed. With a 600 s gap and a
+    shorter expiry window, Home Assistant expired the sensors while the bridge was
+    perfectly healthy."""
+
+    def setUp(self):
+        ctx = isolated_state()
+        ctx.__enter__()
+        self.addCleanup(lambda: ctx.__exit__(None, None, None))
+
+    def test_it_becomes_due_without_any_payload_arriving(self):
+        parser_module.LAST_PUBLISH_TS = 1000.0
+        with mock.patch.multiple(
+            parser_module, EXPIRE_AFTER_SEC=1800, UPDATE_INTERVAL_SEC=10
+        ):
+            self.assertFalse(parser_module.heartbeat_due(1000.0 + 100))
+            self.assertTrue(parser_module.heartbeat_due(1000.0 + 601))
+
+    def test_it_fires_well_inside_the_expiry_window(self):
+        """Whatever the window, the republish interval has to be a fraction of it."""
+        for window in (600, 1800, 3600):
+            with self.subTest(expire_after=window):
+                parser_module.LAST_PUBLISH_TS = 0.0
+                with mock.patch.multiple(
+                    parser_module, EXPIRE_AFTER_SEC=window, UPDATE_INTERVAL_SEC=10
+                ):
+                    interval = max(10, window // 3)
+                    self.assertTrue(parser_module.heartbeat_due(interval))
+                    self.assertLess(interval, window)
+
+    def test_disabling_expiry_disables_the_heartbeat(self):
+        parser_module.LAST_PUBLISH_TS = 0.0
+        with mock.patch.multiple(parser_module, EXPIRE_AFTER_SEC=0):
+            self.assertFalse(parser_module.heartbeat_due(999999))
+
+    def test_republish_sends_the_retained_state(self):
+        shared_state.DISCOVERY_PUBLISHED = True
+        shared_state.LAST_STATE.clear()
+        shared_state.LAST_STATE.update({"bat_v": 53.7})
+        publish = mock.Mock()
+        with mock.patch.object(
+            parser_module, "_get_mqtt_publish", return_value=(mock.Mock(), publish)
+        ):
+            self.assertTrue(parser_module.republish_state(now=123.0))
+        publish.assert_called_once()
+        self.assertEqual(parser_module.LAST_PUBLISH_TS, 123.0)
+
+    def test_nothing_is_republished_before_discovery(self):
+        shared_state.DISCOVERY_PUBLISHED = False
+        self.assertFalse(parser_module.republish_state(now=1.0))
+
+
+class TestCachedFabricationsArePurged(unittest.TestCase):
+    """Stage B stopped generating the fabricated sensors but never removed the ones
+    already written to /data/state.json. They were restored on every start and
+    republished, so on a live installation `mode` still read "Battery Mode" three
+    releases after the code that invented it was deleted."""
+
+    def test_undecodable_keys_are_dropped_on_load(self):
+        from src.siseli_bridge.sensors import UNDECODED_SENSOR_KEYS
+
+        with isolated_state(), tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "state.json")
+            with open(path, "w") as f:
+                json.dump(
+                    {
+                        "bat_v": 53.7,
+                        "mode": "Battery Mode",
+                        "overloaded": "No",
+                        "bms_communication_normal": "Yes",
+                    },
+                    f,
+                )
+            shared_state.LAST_STATE.clear()
+            with mock.patch("src.siseli_bridge.core.log"):
+                core.load_cached_state(path)
+
+            self.assertEqual(shared_state.LAST_STATE["bat_v"], 53.7, "real values survive")
+            for key in ("mode", "overloaded", "bms_communication_normal"):
+                with self.subTest(key=key):
+                    self.assertIn(key, UNDECODED_SENSOR_KEYS)
+                    self.assertNotIn(key, shared_state.LAST_STATE)
+
+    def test_the_discard_is_reported(self):
+        with isolated_state(), tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "state.json")
+            with open(path, "w") as f:
+                json.dump({"mode": "Battery Mode"}, f)
+            shared_state.LAST_STATE.clear()
+            lines = []
+            with mock.patch("src.siseli_bridge.core.log", side_effect=lambda m, **k: lines.append(m)):
+                core.load_cached_state(path)
+            self.assertTrue(any("no decode path" in line for line in lines))
 
 
 if __name__ == "__main__":
