@@ -1,7 +1,9 @@
+import collections
 import json
 import os
 import threading
-from typing import Dict
+import time
+from typing import Deque, Dict, Optional
 
 # Shared mutable state consumed by core.py, mqtt.py and parsers.py.
 # Having these globals here breaks the circular import that previously required
@@ -29,8 +31,25 @@ RUNNING: bool = True
 #: cloud stream has stopped carrying data.
 LAST_TELEMETRY_TS: float = 0.0
 
+#: Gaps, in seconds, between the last few decoded telemetry payloads -- newest last.
+#: The availability watchdog floors its timeout on these. A timeout shorter than the
+#: inverter's real reporting cadence marks every entity unavailable between payloads,
+#: and raising the shipped default does not fix an install that already stored the old
+#: one, so the floor has to be measured rather than configured.
+TELEMETRY_INTERVALS: Deque[float] = collections.deque(maxlen=8)
+
 #: Set once the stale-discovery sweep has run in this process.
 DISCOVERY_CLEANED: bool = False
+
+
+def record_telemetry(now: Optional[float] = None) -> None:
+    """Stamp a decoded payload and remember the gap since the previous one."""
+    global LAST_TELEMETRY_TS
+    now = now if now is not None else time.time()
+    previous = LAST_TELEMETRY_TS
+    if previous and now > previous:
+        TELEMETRY_INTERVALS.append(now - previous)
+    LAST_TELEMETRY_TS = now
 
 
 def snapshot_state() -> Dict[str, object]:

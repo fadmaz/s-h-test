@@ -70,6 +70,16 @@ EXPIRE_AFTER_SEC = int(os.getenv("EXPIRE_AFTER_SEC", "1800"))
 RESET_ENERGY_COUNTERS = os.getenv("RESET_ENERGY_COUNTERS", "false").strip().lower() in {"1", "true", "yes", "on"}
 DISCOVERY_CLEANUP = os.getenv("DISCOVERY_CLEANUP", "true").strip().lower() in {"1", "true", "yes", "on"}
 TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "1800"))
+
+# The availability watchdog floors TELEMETRY_TIMEOUT_SEC at this multiple of the
+# largest recently observed gap between decoded payloads, capped by the ceiling.
+# Deliberately not add-on options: Supervisor stores an option's value the first time
+# the user saves the configuration page, and a stored value shadows every later change
+# to the shipped default. TELEMETRY_TIMEOUT_SEC therefore cannot be fixed by raising
+# it in config.yaml, so the protection has to come from measured cadence instead.
+# Three intervals at the observed 600 s worst-case gap reproduces the 1800 s default.
+TELEMETRY_TIMEOUT_MULTIPLIER = float(os.getenv("TELEMETRY_TIMEOUT_MULTIPLIER", "3"))
+TELEMETRY_TIMEOUT_CEILING_SEC = int(os.getenv("TELEMETRY_TIMEOUT_CEILING_SEC", "3600"))
 FORWARD_ALL_INVERTER_TRAFFIC = os.getenv("FORWARD_ALL_INVERTER_TRAFFIC", "false").strip().lower() in {"1", "true", "yes", "on"}
 MQTT_RETAIN = os.getenv("MQTT_RETAIN", "true").strip().lower() in {"1", "true", "yes", "on"}
 LOG_LEVEL_STR = os.getenv("LOG_LEVEL", "info").strip().lower()

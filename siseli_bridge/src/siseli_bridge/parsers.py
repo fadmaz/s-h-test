@@ -1749,7 +1749,7 @@ class SolarParser:
                 # works from the snapshot so nothing iterates a dict the capture
                 # thread may resize underneath it.
                 snapshot = _shared_state.update_state(clean_state)
-                _shared_state.LAST_TELEMETRY_TS = time.time()
+                _shared_state.record_telemetry()
 
                 _write_state_cache(snapshot)
 

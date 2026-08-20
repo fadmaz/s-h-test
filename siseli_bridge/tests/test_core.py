@@ -51,6 +51,7 @@ class _CoreTestCase(unittest.TestCase):
             core.LAST_PACKET_TS,
             set(core.KNOWN_INVERTER_MACS),
             set(core.KNOWN_ROUTER_MACS),
+            core.ADAPTIVE_TIMEOUT_LOGGED,
         )
         core.INV_MAC, core.RTR_MAC = INV_MAC, RTR_MAC
         shared_state.RUNNING = True
@@ -83,6 +84,7 @@ class _CoreTestCase(unittest.TestCase):
             core.LAST_PACKET_TS,
             known_inv,
             known_rtr,
+            core.ADAPTIVE_TIMEOUT_LOGGED,
         ) = self._saved
         core.KNOWN_INVERTER_MACS.clear()
         core.KNOWN_INVERTER_MACS.update(known_inv)
@@ -496,12 +498,20 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
         self._online = core._AVAILABILITY_ONLINE
         self.addCleanup(lambda: setattr(core, "_AVAILABILITY_ONLINE", self._online))
 
-    def _flaps_at(self, timeout):
-        """Replay the observed cadence and count availability transitions."""
+    def _flaps_at(self, timeout, measure_cadence=True):
+        """Replay the observed cadence and count availability transitions.
+
+        ``measure_cadence=False`` stamps the timestamp directly instead of going
+        through ``record_telemetry``, reproducing the behaviour before the watchdog
+        learned to floor its timeout on the intervals it observes.
+        """
         transitions = []
         now = 1000.0
         core._AVAILABILITY_ONLINE = True
-        shared_state.LAST_TELEMETRY_TS = now
+        core.ADAPTIVE_TIMEOUT_LOGGED = False
+        shared_state.TELEMETRY_INTERVALS.clear()
+        shared_state.LAST_TELEMETRY_TS = 0.0
+        shared_state.record_telemetry(now)
         with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=timeout), mock.patch(
             "src.siseli_bridge.core.publish_availability"
         ), mock.patch("src.siseli_bridge.core.log"):
@@ -512,7 +522,10 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
                     if result is not None:
                         transitions.append(result)
                 now += gap
-                shared_state.LAST_TELEMETRY_TS = now
+                if measure_cadence:
+                    shared_state.record_telemetry(now)
+                else:
+                    shared_state.LAST_TELEMETRY_TS = now
         return transitions
 
     def test_the_shipped_default_survives_the_observed_cadence(self):
@@ -525,9 +538,29 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
             "real inverter actually reports",
         )
 
-    def test_the_old_default_flapped_on_every_payload(self):
+    def test_the_old_default_flaps_when_the_cadence_is_not_measured(self):
         """Documents why 180 s was wrong, so it is not chosen again."""
-        self.assertTrue(self._flaps_at(180), "180s is expected to flap at this cadence")
+        self.assertTrue(
+            self._flaps_at(180, measure_cadence=False),
+            "180s is expected to flap at this cadence",
+        )
+
+    def test_a_stored_180_stops_flapping_once_the_cadence_is_measured(self):
+        """The bug a user actually hit on 2.6.5.
+
+        Supervisor pins an option the first time the configuration page is saved, so
+        an install that stored 2.6.1's 180 s keeps it however high later releases set
+        the default. The watchdog therefore has to protect itself from its own
+        configuration. One transition pair before the first interval is known is
+        unavoidable; after that the floor holds.
+        """
+        transitions = self._flaps_at(180)
+        self.assertEqual(
+            transitions,
+            [False, True],
+            "a stored 180s must settle after the first measured interval, not flap "
+            "on every payload",
+        )
 
     def test_a_genuine_stall_is_still_detected(self):
         from src.siseli_bridge import config as cfg
@@ -539,6 +572,79 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
              mock.patch("src.siseli_bridge.core.log"):
             stalled = core.availability_watchdog_tick(1000.0 + cfg.TELEMETRY_TIMEOUT_SEC + 1)
         self.assertIs(stalled, False, "a real stall must still be reported")
+
+
+class TestAdaptiveTelemetryTimeout(_CoreTestCase):
+    """The watchdog floors its timeout on the cadence it measures.
+
+    A configured timeout cannot be trusted on its own: Supervisor pins an option's
+    value the first time the user saves the configuration page, and a pinned value
+    shadows every later change to the shipped default. Raising the default in
+    config.yaml fixes fresh installs only.
+    """
+
+    def setUp(self):
+        super().setUp()
+        core._AVAILABILITY_ONLINE = True
+        core.ADAPTIVE_TIMEOUT_LOGGED = False
+        shared_state.TELEMETRY_INTERVALS.clear()
+        shared_state.LAST_TELEMETRY_TS = 0.0
+        self.addCleanup(lambda: setattr(core, "_AVAILABILITY_ONLINE", True))
+
+    def test_no_history_reports_no_observed_interval(self):
+        self.assertEqual(core.observed_telemetry_interval(), 0.0)
+
+    def test_record_telemetry_measures_the_gap(self):
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1300.0)
+        shared_state.record_telemetry(1900.0)
+        self.assertEqual(list(shared_state.TELEMETRY_INTERVALS), [300.0, 600.0])
+        self.assertEqual(core.observed_telemetry_interval(), 600.0)
+
+    def test_the_first_payload_records_no_interval(self):
+        shared_state.record_telemetry(1000.0)
+        self.assertEqual(list(shared_state.TELEMETRY_INTERVALS), [])
+
+    def test_a_generous_configured_timeout_is_left_alone(self):
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1300.0)
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=1800):
+            self.assertEqual(core.effective_telemetry_timeout(), 1800.0)
+
+    def test_a_too_small_configured_timeout_is_floored(self):
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1600.0)  # a 600 s gap, as observed live
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=180),              mock.patch("src.siseli_bridge.core.log"):
+            self.assertEqual(core.effective_telemetry_timeout(), 1800.0)
+
+    def test_an_overnight_gap_cannot_produce_an_absurd_timeout(self):
+        """Without the ceiling an inverter switched off for eight hours would leave
+        the watchdog unable to report a real outage for a day."""
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1000.0 + 8 * 3600)
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=180),              mock.patch("src.siseli_bridge.core.log"):
+            self.assertEqual(
+                core.effective_telemetry_timeout(),
+                float(core.TELEMETRY_TIMEOUT_CEILING_SEC),
+            )
+
+    def test_the_adjustment_is_logged_once(self):
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1600.0)
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=180),              mock.patch("src.siseli_bridge.core.log") as logged:
+            core.effective_telemetry_timeout()
+            core.effective_telemetry_timeout()
+        self.assertEqual(logged.call_count, 1)
+        message = logged.call_args[0][0]
+        self.assertIn("180", message)
+        self.assertIn("1800", message)
+
+    def test_a_real_outage_is_still_detected_under_the_floor(self):
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1600.0)
+        with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=180),              mock.patch("src.siseli_bridge.core.log"):
+            self.assertTrue(core.telemetry_is_fresh(now=1600.0 + 1799))
+            self.assertFalse(core.telemetry_is_fresh(now=1600.0 + 1801))
 
 
 class TestHeartbeatIsTimerDriven(unittest.TestCase):
