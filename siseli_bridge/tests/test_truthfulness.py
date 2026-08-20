@@ -18,7 +18,7 @@ from src.siseli_bridge import parsers as parser_module
 from src.siseli_bridge import state as shared_state
 from src.siseli_bridge.parsers import SolarParser
 from tests import captures
-from tests.helpers import envelope, isolated_state
+from tests.helpers import envelope, isolated_state, patch_consts
 
 
 class _ParserTestCase(unittest.TestCase):
@@ -163,6 +163,85 @@ class TestRangeGuards(_ParserTestCase):
         self.assertEqual(state["cell_1_mv"], 3321)
         self.assertEqual(state["cell_2_mv"], 3321)
         self.assertNotIn("cell_3_mv", state)
+
+
+class TestEnergyIntegrationWindow(_ParserTestCase):
+    """The integrator must credit the interval the inverter actually reported over.
+
+    _energy_dt_seconds used to bound dt at max(UPDATE_INTERVAL_SEC * 6, 60), which is
+    60 s at the shipped default. Payloads arrive every ~300 s with observed 600 s
+    gaps, so the bound fired on every single step and all three kWh counters accrued a
+    fifth of the real energy -- silently, and with the whole suite passing, because no
+    test ever drove an interval longer than the bound.
+    """
+
+    #: The live capture: 52.6 V x 104.3 A, exactly as published.
+    DISCHARGE_W = 5486.0
+
+    def setUp(self):
+        super().setUp()
+        parser_module.ENERGY_DT_CLAMP_LOGGED = False
+
+    def test_a_real_300s_interval_is_credited_in_full(self):
+        parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+        self.assertEqual(SolarParser._energy_dt_seconds("battery", 1300.0), 300.0)
+
+    def test_the_observed_600s_gap_is_credited_in_full(self):
+        parser_module.LAST_ENERGY_TS_GRID = 1000.0
+        self.assertEqual(SolarParser._energy_dt_seconds("grid", 1600.0), 600.0)
+
+    def test_an_abnormal_jump_is_still_bounded(self):
+        """A clock jump or a suspended process must not credit a fabricated block."""
+        parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+        with mock.patch("src.siseli_bridge.parsers.log_kv"):
+            dt = SolarParser._energy_dt_seconds("battery", 1000.0 + 6 * 3600)
+        self.assertEqual(dt, float(parser_module.ENERGY_MAX_DT_SEC))
+
+    def test_the_bound_rises_with_a_slower_measured_cadence(self):
+        """An inverter reporting every 15 min must not be truncated at 1200 s."""
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1000.0 + 900.0)
+        self.assertEqual(SolarParser._energy_max_dt(), 1800.0)
+
+    def test_the_bound_is_capped(self):
+        shared_state.record_telemetry(1000.0)
+        shared_state.record_telemetry(1000.0 + 8 * 3600)
+        self.assertEqual(
+            SolarParser._energy_max_dt(), float(parser_module.TELEMETRY_TIMEOUT_CEILING_SEC)
+        )
+
+    def test_an_hour_of_discharge_records_an_hour_of_energy(self):
+        """The regression in the units a user reads.
+
+        Twelve payloads at the measured 300 s cadence, at the discharge power from the
+        live capture. The old 60 s bound produced 1.097 kWh for the same hour.
+        """
+        state = {}
+        parser_module.LAST_ENERGY_TS_BATTERY = None
+        now = 1000.0
+        for _ in range(13):  # first call is the baseline, so 12 integration steps
+            dt = SolarParser._energy_dt_seconds("battery", now)
+            SolarParser._accumulate_kwh(state, "c_battery_discharge_energy_kwh", self.DISCHARGE_W, dt)
+            shared_state.LAST_STATE.update(state)
+            now += 300.0
+
+        self.assertAlmostEqual(state["c_battery_discharge_energy_kwh"], 5.486, places=3)
+
+    def test_an_abnormal_gap_is_reported_once(self):
+        parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            SolarParser._energy_dt_seconds("battery", 1000.0 + 6 * 3600)
+            parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+            SolarParser._energy_dt_seconds("battery", 1000.0 + 6 * 3600)
+        self.assertEqual(logged.call_count, 1)
+
+    def test_the_window_does_not_depend_on_the_publish_throttle(self):
+        """UPDATE_INTERVAL_SEC is an MQTT throttle. Deriving the integration window
+        from it is what caused the undercount, and it is Supervisor-pinned, so no
+        default change could have fixed an existing install."""
+        with patch_consts("src.siseli_bridge.parsers", UPDATE_INTERVAL_SEC=1):
+            parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+            self.assertEqual(SolarParser._energy_dt_seconds("battery", 1300.0), 300.0)
 
 
 class TestEnergyDomainGating(_ParserTestCase):

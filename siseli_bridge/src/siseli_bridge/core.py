@@ -345,8 +345,7 @@ ADAPTIVE_TIMEOUT_LOGGED = False
 
 def observed_telemetry_interval() -> float:
     """Largest recent gap between decoded payloads; 0.0 until two have arrived."""
-    intervals = list(_state.TELEMETRY_INTERVALS)
-    return max(intervals) if intervals else 0.0
+    return _state.observed_telemetry_interval()
 
 
 def effective_telemetry_timeout() -> float:
