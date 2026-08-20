@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 - **Dead Code**: `sanitize_block_key` had no call sites, and `_apply_dynamic_debug` took a state parameter it never touched.
+- **Deprecated Architectures**: Dropped `armhf`, `armv7` and `i386` from the supported architecture list. Home Assistant removed support for all three in release 2025.12, so no installation that can run current Home Assistant is affected.
 
 ## [2.6.0] - 2026-08-20
 
