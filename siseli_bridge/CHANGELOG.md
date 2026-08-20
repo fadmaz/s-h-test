@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-08-20
+
+### Fixed
+
+- **Sensors Still Flapped After 2.6.5 Raised The Timeout**: Home Assistant pins an option's value the first time the configuration page is saved, and a pinned value shadows every later change to the shipped default. Any installation that ran 2.6.1 therefore kept `TELEMETRY_TIMEOUT_SEC` at 180 seconds no matter what 2.6.5 shipped, and every entity carried on cycling to Unavailable between payloads. The watchdog now floors its timeout at three times the largest gap it actually measures between decoded payloads, capped at one hour, so a stored value shorter than the inverter's real cadence can no longer mark sensors unavailable. The adjustment is logged once when it first applies.
+
+### Added
+
+- **Timing Options In The Startup Banner**: `UPDATE_INTERVAL_SEC`, `EXPIRE_AFTER_SEC` and `TELEMETRY_TIMEOUT_SEC` are now printed at startup. These are exactly the options Supervisor pins, so the running value can differ from the shipped default with nothing in the log to reveal it -- which is what made the flapping above take several releases to identify.
+
+### Changed
+
+- **Telemetry Timeout Description**: The option help still quoted the old 180 second default and did not mention that the bridge now raises the value on its own.
+
 ## [2.6.5] - 2026-08-20
 
 ### Fixed

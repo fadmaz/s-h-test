@@ -136,6 +136,8 @@ def isolated_state():
     saved_publish_ts = parser_mod.LAST_PUBLISH_TS
     saved_pending = parser_mod.PENDING_PUBLISH
     saved_evict = parser_mod._FLOW_EVICT_COUNTER
+    saved_telemetry_ts = shared_state.LAST_TELEMETRY_TS
+    saved_intervals = list(shared_state.TELEMETRY_INTERVALS)
     try:
         yield
     finally:
@@ -153,6 +155,9 @@ def isolated_state():
         parser_mod.LAST_PUBLISH_TS = saved_publish_ts
         parser_mod.PENDING_PUBLISH = saved_pending
         parser_mod._FLOW_EVICT_COUNTER = saved_evict
+        shared_state.LAST_TELEMETRY_TS = saved_telemetry_ts
+        shared_state.TELEMETRY_INTERVALS.clear()
+        shared_state.TELEMETRY_INTERVALS.extend(saved_intervals)
 
 
 # ---------------------------------------------------------------- fake broker

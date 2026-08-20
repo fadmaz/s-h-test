@@ -340,6 +340,43 @@ def packet_callback(pkt) -> None:
 
 PROCESS_START_TS = time.time()
 _AVAILABILITY_ONLINE = True
+ADAPTIVE_TIMEOUT_LOGGED = False
+
+
+def observed_telemetry_interval() -> float:
+    """Largest recent gap between decoded payloads; 0.0 until two have arrived."""
+    intervals = list(_state.TELEMETRY_INTERVALS)
+    return max(intervals) if intervals else 0.0
+
+
+def effective_telemetry_timeout() -> float:
+    """How long without a decoded reading before the sensors stop being trustworthy.
+
+    Never shorter than the configured timeout, and never shorter than a few of the
+    inverter's own reporting intervals. The second half is the load-bearing one:
+    Supervisor pins an option's value the first time the configuration page is saved,
+    and a pinned value shadows every later change to the shipped default. An install
+    that stored the original 180 s therefore keeps it no matter what a release ships,
+    and every entity flaps unavailable between payloads. A floor measured from the
+    device's own cadence cannot be shadowed that way.
+    """
+    global ADAPTIVE_TIMEOUT_LOGGED
+    observed = observed_telemetry_interval()
+    adaptive = min(
+        observed * TELEMETRY_TIMEOUT_MULTIPLIER,
+        float(TELEMETRY_TIMEOUT_CEILING_SEC),
+    )
+    if adaptive <= TELEMETRY_TIMEOUT_SEC:
+        return float(TELEMETRY_TIMEOUT_SEC)
+    if not ADAPTIVE_TIMEOUT_LOGGED:
+        ADAPTIVE_TIMEOUT_LOGGED = True
+        log(
+            f"[HEALTH] Telemetry arrives up to {int(observed)}s apart, which the "
+            f"configured TELEMETRY_TIMEOUT_SEC of {TELEMETRY_TIMEOUT_SEC}s would flap "
+            f"against; using {int(adaptive)}s instead",
+            level="warning",
+        )
+    return adaptive
 
 
 def telemetry_is_fresh(now: Optional[float] = None) -> bool:
@@ -350,12 +387,13 @@ def telemetry_is_fresh(now: Optional[float] = None) -> bool:
     fresh long after the cloud stream has stopped carrying data.
     """
     now = now if now is not None else time.time()
+    timeout = effective_telemetry_timeout()
     last = _state.LAST_TELEMETRY_TS
     if not last:
         # Startup grace: do not mark 200 entities unavailable for three minutes
         # every time the add-on restarts.
-        return (now - PROCESS_START_TS) < TELEMETRY_TIMEOUT_SEC
-    return (now - last) < TELEMETRY_TIMEOUT_SEC
+        return (now - PROCESS_START_TS) < timeout
+    return (now - last) < timeout
 
 
 def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
@@ -369,7 +407,7 @@ def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
     log(
         "[HEALTH] Telemetry resumed; sensors available again"
         if fresh
-        else f"[HEALTH] No decoded telemetry for {TELEMETRY_TIMEOUT_SEC}s; marking sensors unavailable",
+        else f"[HEALTH] No decoded telemetry for {int(effective_telemetry_timeout())}s; marking sensors unavailable",
         level="info" if fresh else "warning",
     )
     return fresh
@@ -489,6 +527,13 @@ def log_startup_configuration() -> None:
     log(f"[Config] DEVICE_NAME={DEVICE_NAME} MANUFACTURER={MANUFACTURER}")
     log(f"[Config] STATE_TOPIC={STATE_TOPIC}")
     log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
+    # Printed because these are the options Supervisor pins on first save, so the
+    # running value can differ from the shipped default and nothing else reveals it.
+    log(
+        f"[Config] UPDATE_INTERVAL_SEC={UPDATE_INTERVAL_SEC} "
+        f"EXPIRE_AFTER_SEC={EXPIRE_AFTER_SEC} "
+        f"TELEMETRY_TIMEOUT_SEC={TELEMETRY_TIMEOUT_SEC}"
+    )
     log(f"[Config] DEBUG_FLAGS={list(ACTIVE_DEBUG_FLAGS) or 'none'}")
 
 

@@ -98,6 +98,15 @@ an update.** Tightening a schema can block the upgrade for existing installs. A
 trailing `?` means the option may be *absent*; it does not exempt an empty string.
 Removing an option entirely also blocks it. `tests/test_packaging.py` guards both.
 
+**A stored option shadows the shipped default forever.** Supervisor pins every
+option's value the first time the user saves the configuration page, and
+`bashio::config` then reads that pin. Changing a default in `config.yaml` fixes fresh
+installs *only* — every existing user keeps the old value however many releases ship.
+So a default is not a fix. If a wrong value can break the add-on, the runtime has to
+defend itself against its own configuration: `effective_telemetry_timeout()` is the
+pattern. Print any option of this kind in `log_startup_configuration()`, or the
+running value is invisible in a user's log.
+
 **`/data/state.json` outlives the code.** Removing a sensor from the parser does not
 remove it from anyone's dashboard — the cached value is restored and republished.
 Purge it in `load_cached_state` via `UNDECODED_SENSOR_KEYS`.
@@ -105,7 +114,9 @@ Purge it in `load_cached_state` via `UNDECODED_SENSOR_KEYS`.
 **Timing defaults must come from measured cadence,** not from another option. This
 inverter reports every ~300s with 600s gaps; a timeout derived from
 `UPDATE_INTERVAL_SEC` made every sensor flap. The observed cadence is a fixture in
-`tests/test_core.py`.
+`tests/test_core.py`. Better still, measure it at runtime — the availability watchdog
+floors its timeout on the intervals it actually sees, which is what makes it immune to
+the pinned-option trap above.
 
 **`gh` defaults to the upstream fork.** Always pass `--repo fadmaz/siseli-ha`.
 

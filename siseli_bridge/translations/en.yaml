@@ -94,7 +94,7 @@ configuration:
     description: 'On the first start after an upgrade, removes leftover Home Assistant entities from earlier versions that grouped sensors differently. Leave enabled unless you are troubleshooting.'
   TELEMETRY_TIMEOUT_SEC:
     name: 'Telemetry Timeout (Seconds)'
-    description: 'How long without a decoded reading before every sensor is marked unavailable. Raise this if your inverter reports infrequently (Default: 180).'
+    description: 'How long without a decoded reading before every sensor is marked unavailable. The bridge automatically raises this if it measures your inverter reporting less often than this, so entities cannot flap (Default: 1800).'
   FORWARD_ALL_INVERTER_TRAFFIC:
     name: 'Forward All Inverter Traffic'
     description: 'Advanced. With ARP interception on, the add-on becomes the inverter gateway but only relays broker traffic, so DNS and NTP are dropped. Enable this if the health log reports dropped packets and your inverter fails to reconnect. Off by default.'
