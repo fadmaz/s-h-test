@@ -1,9 +1,65 @@
+import json
+import os
+import threading
 from typing import Dict
 
-# Shared mutable state consumed by both mqtt.py and parsers.py.
+# Shared mutable state consumed by core.py, mqtt.py and parsers.py.
 # Having these globals here breaks the circular import that previously required
 # a deferred-import hack (_get_mqtt_globals) inside parsers.py.
 
 LAST_STATE: Dict[str, object] = {}
 DISCOVERY_PUBLISHED: bool = False
 PUBLISHED_SENSOR_KEYS: set = set()
+
+#: Guards LAST_STATE. It is written on the scapy capture thread and read on the paho
+#: network thread; without this, a dict resize during on_connect's iteration raises
+#: RuntimeError inside a paho callback, which kills the network thread silently while
+#: the bridge keeps parsing and logging as though nothing were wrong.
+#: Only ever held long enough to take a dict() copy -- never across I/O.
+STATE_LOCK = threading.RLock()
+
+#: Lifecycle flag. It lives here, not in mqtt.py, because core owns shutdown and
+#: mqtt.py must observe it. Previously mqtt.py defined it and core imported it by
+#: value, so core.shutdown() rebound only its own copy and mqtt's stayed True forever.
+RUNNING: bool = True
+
+#: Wall-clock time of the last *successfully parsed telemetry payload*. This is the
+#: only trustworthy liveness signal: core's LAST_PACKET_TS is set for any packet
+#: matching the capture filter, bare ACKs included, so it stays fresh long after the
+#: cloud stream has stopped carrying data.
+LAST_TELEMETRY_TS: float = 0.0
+
+#: Set once the stale-discovery sweep has run in this process.
+DISCOVERY_CLEANED: bool = False
+
+
+def snapshot_state() -> Dict[str, object]:
+    """A consistent copy of LAST_STATE, safe to iterate off-thread."""
+    with STATE_LOCK:
+        return dict(LAST_STATE)
+
+
+def update_state(values: Dict[str, object]) -> Dict[str, object]:
+    """Merge values into LAST_STATE and return a snapshot taken under the same lock."""
+    with STATE_LOCK:
+        LAST_STATE.update(values)
+        return dict(LAST_STATE)
+
+
+def atomic_write_json(path: str, payload: object) -> None:
+    """Write JSON so a reader never observes a half-written file.
+
+    The previous truncate-then-write meant a kill mid-write left invalid JSON, and the
+    loader's broad except turned that into an empty state -- silently zeroing every
+    cumulative energy counter.
+    """
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as handle:
+        json.dump(payload, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, path)

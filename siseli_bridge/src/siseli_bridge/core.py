@@ -7,14 +7,35 @@ import time
 import warnings
 from typing import Optional
 
-from scapy.all import ARP, Ether, IP, Raw, TCP, UDP, AsyncSniffer, getmacbyip, sendp  # type: ignore
+from scapy.all import (  # type: ignore
+    ARP,
+    IP,
+    TCP,
+    UDP,
+    AsyncSniffer,
+    Ether,
+    Raw,
+    conf,
+    get_if_hwaddr,
+    getmacbyip,
+    sendp,
+)
 
 from .config import *
-from .loggers import log, log_kv, json_log, log_payload_preview, printable_text_preview, hex_preview
-from .sensors import SENSORS, get_grouped_sensor_keys
+from .loggers import log, log_kv, log_payload_preview
+from .sensors import SENSORS
 from . import state as _state
-from .mqtt import client, start_mqtt, publish_discovery, RUNNING, availability_topic_for_group
-from .parsers import SolarParser, extract_publish_payload, append_stream_data, mqtt_type_name, SEEN_MQTT_TOPICS
+from .mqtt import client, publish_availability, start_mqtt
+from .parsers import (
+    SEEN_MQTT_TOPICS,
+    SolarParser,
+    append_stream_data,
+    drop_flow,
+    extract_publish_payload,
+    mqtt_type_name,
+    reset_flow,
+)
+from .version import __version__ as VERSION
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -35,13 +56,76 @@ RTR_MAC: Optional[str] = None
 sniffer: Optional[AsyncSniffer] = None
 
 from .config import STATE_CACHE_FILE
-    
-try:
-    if os.path.exists(STATE_CACHE_FILE):
-        with open(STATE_CACHE_FILE, "r") as f:
-            _state.LAST_STATE.update(json.load(f))
-except Exception as e:
-    log(f"[CACHE] Error loading state: {e}", level="error")
+
+
+ENERGY_COUNTER_KEYS = (
+    "c_battery_charge_energy_kwh",
+    "c_battery_discharge_energy_kwh",
+    "c_grid_import_energy_kwh",
+)
+
+
+def load_cached_state(path: str = STATE_CACHE_FILE) -> None:
+    """Restore LAST_STATE from disk. Called from __main__ after validate_config(),
+    which is what creates the /data directory."""
+    try:
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                cached = json.load(f)
+            if not isinstance(cached, dict):
+                log(f"[CACHE] Ignoring {path}: expected an object, got {type(cached).__name__}", level="error")
+                return
+
+            # The energy counters are state_class: total_increasing, so a corrupt or
+            # negative value can never correct itself downward. Drop those rather
+            # than restoring them.
+            dropped = []
+            for key in ENERGY_COUNTER_KEYS:
+                value = cached.get(key)
+                if value is None:
+                    continue
+                if not isinstance(value, (int, float)) or value < 0 or value != value or value in (float("inf"), float("-inf")):
+                    dropped.append(key)
+                    cached.pop(key, None)
+            if dropped:
+                log(f"[CACHE] Dropped invalid energy counters: {', '.join(dropped)}", level="warning")
+
+            if RESET_ENERGY_COUNTERS:
+                for key in ENERGY_COUNTER_KEYS:
+                    cached.pop(key, None)
+                log(
+                    "[CACHE] RESET_ENERGY_COUNTERS is on: calculated energy totals zeroed. "
+                    "Turn the option back off so they are not zeroed again on the next restart.",
+                    level="warning",
+                )
+
+            _state.LAST_STATE.update(cached)
+    except Exception as e:
+        log(f"[CACHE] Error loading state: {e}", level="error")
+
+OWN_MAC: Optional[str] = None
+#: Inverter packets dropped because they were not broker traffic, by protocol.
+#: Surfaced in the health line so the need for FORWARD_ALL_INVERTER_TRAFFIC can be
+#: judged from evidence rather than guessed at.
+DROPPED_NON_TARGET = {}
+
+
+def resolve_own_mac() -> Optional[str]:
+    """Our own MAC on the capture interface, or None if it cannot be determined.
+
+    Used to recognise the frames we ourselves re-emitted. Without it those frames are
+    indistinguishable from inverter traffic, which is why the health line reported the
+    bridge's own MAC as both an inverter and a router address.
+    """
+    global OWN_MAC
+    if OWN_MAC is not None:
+        return OWN_MAC
+    try:
+        OWN_MAC = norm_mac(get_if_hwaddr(SNIFF_IFACE or conf.iface))
+    except Exception:
+        OWN_MAC = None
+    return OWN_MAC
+
 
 KNOWN_INVERTER_MACS = set()
 KNOWN_ROUTER_MACS = set()
@@ -54,7 +138,7 @@ class ArpSpoofer:
         INV_MAC = norm_mac(INVERTER_MAC_CFG) or INV_MAC
         RTR_MAC = norm_mac(ROUTER_MAC_CFG) or RTR_MAC
 
-        while RUNNING and (not INV_MAC or not RTR_MAC):
+        while _state.RUNNING and (not INV_MAC or not RTR_MAC):
             if not INV_MAC:
                 INV_MAC = norm_mac(getmacbyip(INVERTER_IP))
             if not RTR_MAC:
@@ -64,18 +148,18 @@ class ArpSpoofer:
                 log("[ARP] Waiting for MAC addresses...", level="info")
                 time.sleep(2)
 
-        if RUNNING:
+        if _state.RUNNING:
             log(f"[ARP] Inverter MAC: {INV_MAC}", level="info")
             log(f"[ARP] Router MAC:   {RTR_MAC}", level="info")
 
     def run(self) -> None:
         self.resolve_macs()
-        if not RUNNING:
+        if not _state.RUNNING:
             return
 
         log(f"[ARP] Interception ACTIVE: {INVERTER_IP} <-> {ROUTER_IP}", level="info")
 
-        while RUNNING:
+        while _state.RUNNING:
             try:
                 send_layer2(Ether(dst=INV_MAC) / ARP(op=2, pdst=INVERTER_IP, psrc=ROUTER_IP, hwdst=INV_MAC), SNIFF_IFACE)
                 send_layer2(Ether(dst=RTR_MAC) / ARP(op=2, pdst=ROUTER_IP, psrc=INVERTER_IP, hwdst=RTR_MAC), SNIFF_IFACE)
@@ -88,7 +172,30 @@ class ArpSpoofer:
 arp_spoofer = ArpSpoofer()
 
 
+# TCP flag bits we care about. Checked numerically -- scapy exposes flags as a
+# FlagValue, and comparing it to strings silently never matches.
+TCP_FIN = 0x01
+TCP_SYN = 0x02
+TCP_RST = 0x04
+TCP_ACK = 0x10
+
+
 def handle_inverter_tcp_packet(pkt) -> None:
+    flow_key = (pkt[IP].src, int(pkt[TCP].sport), pkt[IP].dst, int(pkt[TCP].dport))
+    flags = int(pkt[TCP].flags)
+
+    # Connection lifecycle is handled before the payload guard, because SYN, FIN and
+    # RST carry no payload. Without this, a reconnect that reused the same socket
+    # pair inside the stale window inherited the dead connection's next_seq and every
+    # segment looked like a giant gap.
+    if flags & TCP_RST or flags & TCP_FIN:
+        drop_flow(flow_key)
+        return
+    if (flags & TCP_SYN) and not (flags & TCP_ACK):
+        # The SYN itself consumes one sequence number.
+        reset_flow(flow_key, initial_seq=int(pkt[TCP].seq) + 1)
+        return
+
     if Raw not in pkt:
         return
 
@@ -96,7 +203,6 @@ def handle_inverter_tcp_packet(pkt) -> None:
     if not payload:
         return
 
-    flow_key = (pkt[IP].src, int(pkt[TCP].sport), pkt[IP].dst, int(pkt[TCP].dport))
     seq = int(pkt[TCP].seq)
 
     packets = append_stream_data(flow_key, seq, payload)
@@ -105,7 +211,7 @@ def handle_inverter_tcp_packet(pkt) -> None:
         return
 
     for packet in packets:
-        if LOG_VERBOSE:
+        if LOG_PACKETS:
             ptype = mqtt_type_name(packet[0])
             log(
                 f"[MQTT PACKET] {pkt[IP].src}:{int(pkt[TCP].sport)} -> "
@@ -120,7 +226,7 @@ def handle_inverter_tcp_packet(pkt) -> None:
                 SEEN_MQTT_TOPICS[topic] = count
                 if LOG_MQTT_TOPICS:
                     log_kv("[MQTT TOPIC]", topic=topic, seen_count=count, payload_len=len(publish_payload or b""))
-            if LOG_VERBOSE and topic is not None:
+            if LOG_PACKETS and topic is not None:
                 log(f"[MQTT PUBLISH] topic={topic} payload_len={len(publish_payload or b'')}")
             if publish_payload and LOG_MQTT_PAYLOAD_PREVIEW:
                 log_payload_preview("[MQTT PAYLOAD]", publish_payload, topic=topic)
@@ -142,15 +248,16 @@ def packet_callback(pkt) -> None:
     src_ip = pkt[IP].src
     dst_ip = pkt[IP].dst
 
+    # Frames we re-emitted ourselves carry our MAC but the inverter's IP. Recognising
+    # them keeps the learned-MAC sets honest and prevents a forwarding loop.
+    own_mac = resolve_own_mac()
+    if own_mac and src_mac == own_mac:
+        return
+
     if src_ip == INVERTER_IP and not INV_MAC:
         INV_MAC = src_mac
     if dst_ip == INVERTER_IP and not RTR_MAC:
         RTR_MAC = src_mac
-
-    if src_ip == INVERTER_IP and src_mac:
-        KNOWN_INVERTER_MACS.add(src_mac)
-    if dst_ip == INVERTER_IP and src_mac:
-        KNOWN_ROUTER_MACS.add(src_mac)
 
     if LOG_VERBOSE and (src_ip == INVERTER_IP or dst_ip == INVERTER_IP):
         proto = "TCP" if TCP in pkt else ("UDP" if UDP in pkt else "OTHER")
@@ -160,6 +267,11 @@ def packet_callback(pkt) -> None:
     if src_ip == INVERTER_IP:
         if INV_MAC and src_mac != INV_MAC:
             return
+
+        # Recorded only after the identity guard. Doing it before meant every
+        # rejected frame still polluted the set the health line reports.
+        if src_mac:
+            KNOWN_INVERTER_MACS.add(src_mac)
 
         if TCP in pkt and dst_ip == TARGET_HOST and int(pkt[TCP].dport) == TARGET_PORT:
             try:
@@ -173,11 +285,34 @@ def packet_callback(pkt) -> None:
                     send_layer2(fwd_pkt, SNIFF_IFACE)
                 except Exception as exc:
                     log(f"[FWD ERROR] inverter->router {exc}", level="error")
+            return
+
+        # Everything else the inverter sends -- DNS, NTP, ICMP, any secondary
+        # endpoint. ARP interception made us its gateway for all of it, but only
+        # broker traffic was ever relayed, so the rest was silently blackholed.
+        proto = "TCP" if TCP in pkt else ("UDP" if UDP in pkt else "OTHER")
+        port = int(pkt[TCP].dport) if TCP in pkt else (int(pkt[UDP].dport) if UDP in pkt else 0)
+        bucket = f"{proto}:{port}" if port else proto
+        DROPPED_NON_TARGET[bucket] = DROPPED_NON_TARGET.get(bucket, 0) + 1
+
+        if FORWARD_ALL_INVERTER_TRAFFIC and AUTO_INTERCEPT and RTR_MAC:
+            # Only frames addressed to us at layer 2 were actually routed here.
+            # Without this guard the inverter's broadcast and multicast traffic gets
+            # re-emitted, duplicating what the real router already received.
+            if own_mac and norm_mac(pkt[Ether].dst) == own_mac:
+                try:
+                    send_layer2(Ether(dst=RTR_MAC) / pkt[IP], SNIFF_IFACE)
+                    DROPPED_NON_TARGET[bucket] -= 1
+                except Exception as exc:
+                    log(f"[FWD ERROR] inverter->router (non-broker) {exc}", level="error")
         return
 
     if dst_ip == INVERTER_IP:
         if RTR_MAC and src_mac != RTR_MAC:
             return
+
+        if src_mac:
+            KNOWN_ROUTER_MACS.add(src_mac)
 
         if AUTO_INTERCEPT and INV_MAC:
             try:
@@ -187,28 +322,112 @@ def packet_callback(pkt) -> None:
                 log(f"[FWD ERROR] router->inverter {exc}", level="error")
 
 
+PROCESS_START_TS = time.time()
+_AVAILABILITY_ONLINE = True
+
+
+def telemetry_is_fresh(now: Optional[float] = None) -> bool:
+    """Whether a decoded reading has arrived recently enough to trust the sensors.
+
+    Deliberately keyed on parsed telemetry rather than LAST_PACKET_TS, which is set
+    for any packet matching the capture filter -- bare ACKs included -- and so stays
+    fresh long after the cloud stream has stopped carrying data.
+    """
+    now = now if now is not None else time.time()
+    last = _state.LAST_TELEMETRY_TS
+    if not last:
+        # Startup grace: do not mark 200 entities unavailable for three minutes
+        # every time the add-on restarts.
+        return (now - PROCESS_START_TS) < TELEMETRY_TIMEOUT_SEC
+    return (now - last) < TELEMETRY_TIMEOUT_SEC
+
+
+def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
+    """Publish availability when it changes. Returns the new state, or None."""
+    global _AVAILABILITY_ONLINE
+    fresh = telemetry_is_fresh(now)
+    if fresh == _AVAILABILITY_ONLINE:
+        return None
+    _AVAILABILITY_ONLINE = fresh
+    publish_availability(fresh)
+    log(
+        "[HEALTH] Telemetry resumed; sensors available again"
+        if fresh
+        else f"[HEALTH] No decoded telemetry for {TELEMETRY_TIMEOUT_SEC}s; marking sensors unavailable",
+        level="info" if fresh else "warning",
+    )
+    return fresh
+
+
 def health_logger() -> None:
-    while RUNNING:
-        time.sleep(30)
+    ticks = 0
+    while _state.RUNNING:
+        # Ten seconds so availability reacts promptly; the health line still prints
+        # every 30 so log volume is unchanged.
+        time.sleep(10)
+        try:
+            availability_watchdog_tick()
+        except Exception as exc:
+            log(f"[HEALTH ERROR] {exc}", level="error")
+
+        ticks += 1
+        if ticks % 3:
+            continue
+
         age = time.time() - LAST_PACKET_TS if LAST_PACKET_TS else -1
         if age < 0:
             log("[HEALTH] No packets captured yet", level="info")
         else:
             inv_list = sorted(x for x in KNOWN_INVERTER_MACS if x)
             rtr_list = sorted(x for x in KNOWN_ROUTER_MACS if x)
+            dropped = {k: v for k, v in sorted(DROPPED_NON_TARGET.items()) if v > 0}
+            extra = f"; dropped_non_broker={dropped}" if dropped else ""
             log(
-                f"[HEALTH] Last packet seen {int(age)}s ago; inverter_macs={inv_list}; router_macs={rtr_list}",
+                f"[HEALTH] Last packet seen {int(age)}s ago; inverter_macs={inv_list}; "
+                f"router_macs={rtr_list}{extra}",
                 level="info",
             )
 
 
-def shutdown(*_args) -> None:
-    global RUNNING, sniffer
+def restore_arp() -> None:
+    """Undo the ARP poisoning so the inverter goes straight back to the real gateway.
 
-    if not RUNNING:
+    The spoofer only ever emits poisoning replies, so stopping the add-on used to
+    leave both caches wrong until they aged out -- minutes during which the inverter
+    could not reach the cloud at all. Note hwsrc is set explicitly here: the poisoning
+    replies omit it precisely so scapy fills in our own MAC, and the corrective ones
+    must not.
+
+    Runs inside a signal handler, so it is hard-bounded at about a second and every
+    failure is swallowed -- it must never block the MQTT teardown that follows.
+    """
+    if not (AUTO_INTERCEPT and INV_MAC and RTR_MAC):
+        return
+    try:
+        for _ in range(5):
+            send_layer2(
+                Ether(dst=INV_MAC)
+                / ARP(op=2, psrc=ROUTER_IP, hwsrc=RTR_MAC, pdst=INVERTER_IP, hwdst=INV_MAC),
+                SNIFF_IFACE,
+            )
+            send_layer2(
+                Ether(dst=RTR_MAC)
+                / ARP(op=2, psrc=INVERTER_IP, hwsrc=INV_MAC, pdst=ROUTER_IP, hwdst=RTR_MAC),
+                SNIFF_IFACE,
+            )
+            time.sleep(0.2)
+        log("[ARP] Restored both peers to their real MAC addresses", level="info")
+    except Exception as exc:
+        log(f"[ARP] Could not restore ARP caches: {exc}", level="error")
+
+
+def shutdown(*_args) -> None:
+    global sniffer
+
+    if not _state.RUNNING:
         return
 
-    RUNNING = False
+    _state.RUNNING = False
 
     try:
         if sniffer is not None:
@@ -216,9 +435,10 @@ def shutdown(*_args) -> None:
     except Exception:
         pass
 
+    restore_arp()
+
     try:
-        for group in get_grouped_sensor_keys():
-            client.publish(availability_topic_for_group(group), "offline", retain=True)
+        publish_availability(False)
         client.disconnect()
         client.loop_stop()
     except Exception:
@@ -227,25 +447,30 @@ def shutdown(*_args) -> None:
     log("[Bridge] Stopped")
 
 
-signal.signal(signal.SIGTERM, shutdown)
-signal.signal(signal.SIGINT, shutdown)
-
-VERSION = "2.5.24"  # Keep in sync with siseli_bridge/config.yaml
+def install_signal_handlers() -> None:
+    """Called from __main__ only. At module scope this would hijack the signal
+    handlers of any process that merely imports core (e.g. the test runner), and
+    raises ValueError when imported off the main thread."""
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
 
 if __name__ == "__main__":
     from .config import validate_config
     validate_config()
+    install_signal_handlers()
+    load_cached_state()
     log(f"--- Siseli Inverter Bridge {VERSION} ---")
     log(f"[Config] INVERTER_IP={INVERTER_IP} ROUTER_IP={ROUTER_IP}")
     log(f"[Config] TARGET={TARGET_HOST}:{TARGET_PORT} MQTT={MQTT_HOST}:{MQTT_PORT}")
-    log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT} LISTEN_PORT={LISTEN_PORT}")
+    log(f"[Config] AUTO_INTERCEPT={AUTO_INTERCEPT}")
     log(f"[Config] INVERTER_COUNT={INVERTER_COUNT}")
     log(f"[Config] BATTERY_COUNT={BATTERY_COUNT} BATTERY_CAPACITY_PER_BATTERY_AH={BATTERY_CAPACITY_PER_BATTERY_AH}")
     log(f"[Config] DEVICE_NAME={DEVICE_NAME} MANUFACTURER={MANUFACTURER}")
     log(f"[Config] STATE_TOPIC={STATE_TOPIC}")
     log(f"[Config] SNIFF_IFACE={SNIFF_IFACE or 'auto'}")
-    log(f"[Config] DEBUG_FLAGS verbose={LOG_VERBOSE} blocks={LOG_BLOCKS} state_diff={LOG_STATE_DIFF} state_snapshot={LOG_STATE_SNAPSHOT} raw_json={LOG_RAW_JSON} clean_state={LOG_CLEAN_STATE} mqtt_topics={LOG_MQTT_TOPICS} payload_preview={LOG_MQTT_PAYLOAD_PREVIEW} unparsed={LOG_UNPARSED_PUBLISH} stream_events={LOG_STREAM_EVENTS} null_targets={LOG_NULL_TARGETS}")
+    active_flags = [name for name in DEBUG_FLAG_NAMES if _debug(name)]
+    log(f"[Config] DEBUG_FLAGS={active_flags or 'none'}")
 
     for key in SENSORS.keys():
         _state.LAST_STATE.setdefault(key, None)
@@ -255,7 +480,7 @@ if __name__ == "__main__":
     if AUTO_INTERCEPT:
         threading.Thread(target=arp_spoofer.run, daemon=True).start()
         wait_start = time.time()
-        while RUNNING and time.time() - wait_start < 15 and (not INV_MAC or not RTR_MAC):
+        while _state.RUNNING and time.time() - wait_start < 15 and (not INV_MAC or not RTR_MAC):
             time.sleep(1)
     else:
         INV_MAC = norm_mac(INVERTER_MAC_CFG)
@@ -277,7 +502,7 @@ if __name__ == "__main__":
     log("[Bridge] Sniffer started", level="info")
 
     try:
-        while RUNNING:
+        while _state.RUNNING:
             time.sleep(1)
     except KeyboardInterrupt:
         pass

@@ -1,22 +1,17 @@
 import unittest
-import sys
-import os
 from unittest import mock
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.siseli_bridge.parsers import decode_remaining_length, extract_mqtt_packets_from_stream, validate_publish_packet, SolarParser
 from src.siseli_bridge import parsers as parser_module
 from src.siseli_bridge import state as shared_state
+from tests import captures
+from tests.helpers import isolated_state
 
 class TestParsers(unittest.TestCase):
     def setUp(self):
-        self._last_state_backup = dict(shared_state.LAST_STATE)
-        self._last_energy_ts_backup = parser_module.LAST_ENERGY_TS
-
-    def tearDown(self):
-        shared_state.LAST_STATE.clear()
-        shared_state.LAST_STATE.update(self._last_state_backup)
-        parser_module.LAST_ENERGY_TS = self._last_energy_ts_backup
+        self._isolation = isolated_state()
+        self._isolation.__enter__()
+        self.addCleanup(lambda: self._isolation.__exit__(None, None, None))
 
     def test_decode_remaining_length_single_byte(self):
         # Length 5 takes 1 byte
@@ -78,21 +73,57 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(state["out_hz"], 49.9)
         self.assertEqual(state["output_set_frequency"], 50)
 
-    def test_ascii_schema_93vq_preset_sets_charging_light_to_flicker(self):
-        state = SolarParser._try_ascii_schema({
-            "93VQ": b"(1 050 010 13310110230 011 1 1 0 1 1 015 035 050 025 056.4 056.4 042.0 020 0 0)"
-        })
+    def test_ascii_schema_93vq_does_not_fabricate_preset_values(self):
+        """The 93VQ block used to trigger 25 hardcoded values whenever the packed
+        config word matched one specific inverter's settings. Same input as before,
+        opposite expectation."""
+        state = SolarParser._try_ascii_schema({"93VQ": captures.BLOCK_93VQ_REF})
 
-        self.assertEqual(state["charging_light_status"], "Flicker")
-        self.assertEqual(state["mains_light_status"], "Flicker")
+        for key in (
+            "mode", "output_model", "overloaded", "machine_over_temperature",
+            "low_battery_alarm", "input_voltage_too_high", "eeprom_data_abnormality",
+            "eeprom_read_write_exception", "abnormal_fan_speed", "abnormal_low_pv_power",
+            "abnormal_temperature_sensor", "charging_light_status", "mains_light_status",
+            "inverter_light_status", "warning_light_status", "lcd_back_lighting",
+            "pv_energy_feeding_priority", "pv_grid_connection_agreement",
+        ):
+            with self.subTest(key=key):
+                self.assertNotIn(key, state)
 
-    def test_ascii_schema_eo8w_preset_sets_charging_light_to_flicker(self):
-        state = SolarParser._try_ascii_schema({
-            "eo8w": b"(00 B0100000000000 20211002110B117020000)"
-        })
+        # The genuine token decodes must survive untouched.
+        self.assertEqual(state["output_set_voltage"], 230)
+        self.assertEqual(state["ac_charging_switch"], "Close")
+        self.assertEqual(state["charging_priority_order"], "SNU")
+        self.assertEqual(state["working_mode"], "SBU")
+        self.assertEqual(state["eco"], "Off")
+        self.assertEqual(state["ct_function_switch"], "OFF")
+        self.assertEqual(state["parallel_role"], "Host")
+        self.assertEqual(state["maximum_total_charging_current_a"], 50)
+        self.assertEqual(state["max_utility_charge_current_a"], 10)
+        self.assertEqual(state["bms_low_power_soc"], 15)
+        self.assertEqual(state["float_charging_voltage_v"], 56.4)
+        self.assertEqual(state["low_electric_lock_voltage_v"], 42.0)
+        self.assertEqual(state["grid_connected_current_a"], 20)
 
-        self.assertEqual(state["charging_light_status"], "Flicker")
-        self.assertEqual(state["mains_light_status"], "Flicker")
+    def test_ascii_schema_eo8w_does_not_fabricate_preset_values(self):
+        """Checked against both the original reference block and a real one from a
+        second device, whose flag word differs by a single character -- which is how
+        narrow the equality gate was."""
+        for name, block in (
+            ("reference", captures.BLOCK_EO8W_REF),
+            ("live", captures.BLOCK_EO8W_STATUS),
+        ):
+            with self.subTest(device=name):
+                state = SolarParser._try_ascii_schema({"eo8w": block})
+                for key in (
+                    "charging_light_status", "mains_light_status", "charging_main_switch",
+                    "inverter_light_status", "warning_light_status", "overloaded",
+                    "li_battery_activation_process", "eeprom_data_abnormality",
+                ):
+                    self.assertNotIn(key, state)
+                self.assertEqual(state["status_code"], "00")
+                self.assertIn("eo8w_flags_raw", state)
+                self.assertIn("eo8w_blob_raw", state)
 
     def test_ascii_schema_parses_bms_average_temperature_from_yavb_tail(self):
         state = SolarParser._try_ascii_schema({
@@ -118,7 +149,8 @@ class TestParsers(unittest.TestCase):
             "c_battery_discharge_energy_kwh": 2.0,
             "c_grid_import_energy_kwh": 3.0,
         })
-        parser_module.LAST_ENERGY_TS = 100.0
+        parser_module.LAST_ENERGY_TS_BATTERY = 100.0
+        parser_module.LAST_ENERGY_TS_GRID = 100.0
 
         state = {
             "bat_v": 50.0,
@@ -140,17 +172,21 @@ class TestParsers(unittest.TestCase):
     def test_energy_dashboard_calculations_fallback_and_no_export_import(self):
         shared_state.LAST_STATE.clear()
         shared_state.LAST_STATE.update({
-            "bat_v": 48.0,
-            "bat_charge_current": 5.0,
-            "dischg_current": 4.0,
-            "mains_wdrr_value": -120,
             "c_battery_charge_energy_kwh": 0.0,
             "c_battery_discharge_energy_kwh": 0.0,
             "c_grid_import_energy_kwh": 0.0,
         })
-        parser_module.LAST_ENERGY_TS = 0.0
+        parser_module.LAST_ENERGY_TS_BATTERY = 0.0
+        parser_module.LAST_ENERGY_TS_GRID = 0.0
 
-        state = {}
+        # These now have to arrive in the payload. Reading currents from the cache is
+        # what let a stale BMS reading override a fresh inverter one.
+        state = {
+            "bat_v": 48.0,
+            "bat_charge_current": 5.0,
+            "dischg_current": 4.0,
+            "mains_wdrr_value": -120,
+        }
         with mock.patch("src.siseli_bridge.parsers.INVERTER_COUNT", 1):
             SolarParser._apply_energy_dashboard_calculations(state, now_ts=5.0)
 
@@ -168,7 +204,8 @@ class TestParsers(unittest.TestCase):
             "c_battery_discharge_energy_kwh": 0.8,
             "c_grid_import_energy_kwh": 0.9,
         })
-        parser_module.LAST_ENERGY_TS = None
+        parser_module.LAST_ENERGY_TS_BATTERY = None
+        parser_module.LAST_ENERGY_TS_GRID = None
 
         state = {
             "bat_v": 52.0,

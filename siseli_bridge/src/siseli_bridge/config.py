@@ -3,13 +3,14 @@ import re
 import os
 
 STATE_CACHE_FILE = "/data/state.json"
+# Kept out of state.json, which is merged wholesale into LAST_STATE at boot.
+DISCOVERY_MARKER_FILE = "/data/discovery_state.json"
 
 INVERTER_IP = os.getenv("INVERTER_IP", "192.168.1.139")
 ROUTER_IP = os.getenv("ROUTER_IP", "192.168.1.1")
 
 TARGET_HOST = os.getenv("TARGET_HOST", "8.212.18.157")
 TARGET_PORT = int(os.getenv("TARGET_PORT", "1883"))
-LISTEN_PORT = int(os.getenv("LISTEN_PORT", "18899"))
 
 AUTO_INTERCEPT = os.getenv("AUTO_INTERCEPT", "true").strip().lower() in {"1", "true", "yes", "on"}
 INVERTER_MAC_CFG = os.getenv("INVERTER_MAC", "").strip().lower() or None
@@ -21,7 +22,26 @@ MQTT_USER = os.getenv("MQTT_USER", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 
 MQTT_DISCOVERY_PREFIX = os.getenv("MQTT_DISCOVERY_PREFIX", "homeassistant")
-DEVICE_ID = os.getenv("DEVICE_ID", "siseli_inverter_1")
+DISCOVERY_NODE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def sanitize_device_id(value: str) -> str:
+    """Make DEVICE_ID safe to use as a Home Assistant discovery node id.
+
+    HA's discovery topic matcher accepts only [a-zA-Z0-9_-], so a value with a space
+    creates zero entities with nothing logged anywhere. A '+' or '#' is worse: it is a
+    wildcard, publishing to it is a protocol violation, and mosquitto closes the
+    connection -- which paho then retries, in a loop.
+
+    Case is deliberately preserved. Lowercasing would rename the topics of every user
+    whose id contains a capital, turning a safety fix into a breaking change.
+    """
+    cleaned = DISCOVERY_NODE_RE.sub("_", (value or "").strip()).strip("_")
+    return cleaned or "siseli_inverter_1"
+
+
+DEVICE_ID_RAW = os.getenv("DEVICE_ID", "siseli_inverter_1")
+DEVICE_ID = sanitize_device_id(DEVICE_ID_RAW)
 DEVICE_NAME = os.getenv("DEVICE_NAME", "Siseli Inverter 1")
 MODEL_NAME = os.getenv("MODEL_NAME", DEVICE_NAME)
 MANUFACTURER = os.getenv("MANUFACTURER", "Siseli Compatible")
@@ -30,57 +50,95 @@ INVERTER_COUNT = int(os.getenv("INVERTER_COUNT", "1"))
 BATTERY_COUNT = int(os.getenv("BATTERY_COUNT", "1"))
 BATTERY_CAPACITY_PER_BATTERY_AH = float(os.getenv("BATTERY_CAPACITY_PER_BATTERY_AH", "0.0"))
 
-STATE_TOPIC = os.getenv("STATE_TOPIC", f"siseli/{DEVICE_ID}/state")
-AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", f"siseli/{DEVICE_ID}/availability")
+# Blank means "derive from DEVICE_ID". These used to ship a literal default naming
+# siseli_inverter_1, so Supervisor always materialised the key, the fallback below was
+# unreachable, and changing DEVICE_ID did not move the topics.
+_LEGACY_STATE_TOPIC = "siseli/siseli_inverter_1/state"
+_LEGACY_AVAILABILITY_TOPIC = "siseli/siseli_inverter_1/availability"
+
+STATE_TOPIC = os.getenv("STATE_TOPIC", "").strip() or f"siseli/{DEVICE_ID}/state"
+AVAILABILITY_TOPIC = os.getenv("AVAILABILITY_TOPIC", "").strip() or f"siseli/{DEVICE_ID}/availability"
 
 SNIFF_IFACE = os.getenv("SNIFF_IFACE", "").strip() or None
 
 UPDATE_INTERVAL_SEC = int(os.getenv("UPDATE_INTERVAL_SEC", "10"))
+EXPIRE_AFTER_SEC = int(os.getenv("EXPIRE_AFTER_SEC", "600"))
+RESET_ENERGY_COUNTERS = os.getenv("RESET_ENERGY_COUNTERS", "false").strip().lower() in {"1", "true", "yes", "on"}
+DISCOVERY_CLEANUP = os.getenv("DISCOVERY_CLEANUP", "true").strip().lower() in {"1", "true", "yes", "on"}
+TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "180"))
+FORWARD_ALL_INVERTER_TRAFFIC = os.getenv("FORWARD_ALL_INVERTER_TRAFFIC", "false").strip().lower() in {"1", "true", "yes", "on"}
 MQTT_RETAIN = os.getenv("MQTT_RETAIN", "true").strip().lower() in {"1", "true", "yes", "on"}
 LOG_LEVEL_STR = os.getenv("LOG_LEVEL", "info").strip().lower()
 
-if LOG_LEVEL_STR == "debug":
-    LOG_VERBOSE = True
-    LOG_BLOCKS = True
-    LOG_STATE_DIFF = True
-    LOG_STATE_SNAPSHOT = True
-    LOG_RAW_JSON = True
-    LOG_CLEAN_STATE = True
-    LOG_MQTT_TOPICS = True
-    LOG_MQTT_PAYLOAD_PREVIEW = True
-    LOG_UNPARSED_PUBLISH = True
-    LOG_STREAM_EVENTS = True
-    LOG_NULL_TARGETS = True
-elif LOG_LEVEL_STR in {"warning", "error"}:
-    LOG_VERBOSE = False
-    LOG_BLOCKS = False
-    LOG_STATE_DIFF = False
-    LOG_STATE_SNAPSHOT = False
-    LOG_RAW_JSON = False
-    LOG_CLEAN_STATE = False
-    LOG_MQTT_TOPICS = False
-    LOG_MQTT_PAYLOAD_PREVIEW = False
-    LOG_UNPARSED_PUBLISH = False
-    LOG_STREAM_EVENTS = False
-    LOG_NULL_TARGETS = False
-else:
-    LOG_VERBOSE = os.getenv("LOG_VERBOSE", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_BLOCKS = os.getenv("LOG_BLOCKS", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_STATE_DIFF = os.getenv("LOG_STATE_DIFF", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_STATE_SNAPSHOT = os.getenv("LOG_STATE_SNAPSHOT", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_RAW_JSON = os.getenv("LOG_RAW_JSON", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_CLEAN_STATE = os.getenv("LOG_CLEAN_STATE", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_MQTT_TOPICS = os.getenv("LOG_MQTT_TOPICS", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_MQTT_PAYLOAD_PREVIEW = os.getenv("LOG_MQTT_PAYLOAD_PREVIEW", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_UNPARSED_PUBLISH = os.getenv("LOG_UNPARSED_PUBLISH", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_STREAM_EVENTS = os.getenv("LOG_STREAM_EVENTS", "false").strip().lower() in {"1", "true", "yes", "on"}
-    LOG_NULL_TARGETS = os.getenv("LOG_NULL_TARGETS", "false").strip().lower() in {"1", "true", "yes", "on"}
+#: Fine-grained debug switches. These were previously read from ten separate
+#: environment variables that had no add-on option, so from the UI they were all-on
+#: (LOG_LEVEL=debug) or all-off -- there was no way to enable just the unparsed-payload
+#: dump, which is exactly what someone with an unsupported inverter needs.
+#:
+#: LOG_VERBOSE is split in two here, because it conflated two different questions:
+#:   xray    -- per-frame capture trace, for "no data is arriving at all"
+#:   packets -- reassembled MQTT packets, for "data arrives but nothing parses"
+DEBUG_FLAG_NAMES = (
+    "xray",
+    "packets",
+    "blocks",
+    "state_diff",
+    "state_snapshot",
+    "raw_json",
+    "clean_state",
+    "mqtt_topics",
+    "mqtt_payload_preview",
+    "unparsed_publish",
+    "stream_events",
+    "null_targets",
+)
 
+_ENABLED_DEBUG_FLAGS = {
+    flag.strip().lower()
+    for flag in os.getenv("DEBUG_FLAGS", "").replace("\n", ",").split(",")
+    if flag.strip()
+}
+UNKNOWN_DEBUG_FLAGS = sorted(_ENABLED_DEBUG_FLAGS - set(DEBUG_FLAG_NAMES))
+
+
+def _debug(flag: str) -> bool:
+    """LOG_LEVEL=debug turns everything on; otherwise honour the explicit list."""
+    return LOG_LEVEL_STR == "debug" or flag in _ENABLED_DEBUG_FLAGS
+
+
+LOG_VERBOSE = _debug("xray")
+LOG_PACKETS = _debug("packets")
+LOG_BLOCKS = _debug("blocks")
+LOG_STATE_DIFF = _debug("state_diff")
+LOG_STATE_SNAPSHOT = _debug("state_snapshot")
+LOG_RAW_JSON = _debug("raw_json")
+LOG_CLEAN_STATE = _debug("clean_state")
+LOG_MQTT_TOPICS = _debug("mqtt_topics")
+LOG_MQTT_PAYLOAD_PREVIEW = _debug("mqtt_payload_preview")
+LOG_UNPARSED_PUBLISH = _debug("unparsed_publish")
+LOG_STREAM_EVENTS = _debug("stream_events")
+LOG_NULL_TARGETS = _debug("null_targets")
+
+#: Deprecated. Kept in the schema so Supervisor does not reject stored options, but
+#: deliberately ignored -- honouring it would preserve the per-packet output it was
+#: meant to remove. Removed entirely in 2.7.0.
+LOG_VERBOSE_DEPRECATED = os.getenv("LOG_VERBOSE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 STRICT_NUM_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 PRINTABLE_ASCII_RE = re.compile(r"^[ -~]+$")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+# Internal, not a user-facing option: bounds how often the state cache is
+# rewritten from the capture thread.
+STATE_CACHE_INTERVAL_SEC = 30
+
+# Bounds on how long reassembly waits for a segment the sniffer never saw. A passive
+# capture drops packets under kernel buffer pressure while the real receiver got them
+# and ACKed them, so the retransmission that would fill the gap never arrives.
+MAX_PENDING_SEGMENTS = 64
+MAX_PENDING_BYTES = 64 * 1024
+STREAM_GAP_TIMEOUT_SEC = 5
 
 MAX_MQTT_PACKET = 1024 * 64
 STREAM_STALE_SECONDS = 30
@@ -102,7 +160,6 @@ def validate_config() -> None:
     for name, val in [
         ("TARGET_PORT", TARGET_PORT),
         ("MQTT_PORT", MQTT_PORT),
-        ("LISTEN_PORT", LISTEN_PORT),
     ]:
         if not (1 <= val <= 65535):
             errors.append(f"{name} must be 1-65535, got {val}")
@@ -110,11 +167,52 @@ def validate_config() -> None:
     if UPDATE_INTERVAL_SEC < 1:
         errors.append(f"UPDATE_INTERVAL_SEC must be >= 1, got {UPDATE_INTERVAL_SEC}")
 
+    if TELEMETRY_TIMEOUT_SEC < 30:
+        errors.append(f"TELEMETRY_TIMEOUT_SEC must be >= 30, got {TELEMETRY_TIMEOUT_SEC}")
+
+    if EXPIRE_AFTER_SEC < 0:
+        errors.append(f"EXPIRE_AFTER_SEC must be >= 0, got {EXPIRE_AFTER_SEC}")
+    elif EXPIRE_AFTER_SEC and UPDATE_INTERVAL_SEC >= EXPIRE_AFTER_SEC:
+        # Otherwise the two options fight: the publish throttle would outlast the
+        # expiry window and every entity would flap to unavailable between updates.
+        errors.append(
+            f"UPDATE_INTERVAL_SEC ({UPDATE_INTERVAL_SEC}) must be less than "
+            f"EXPIRE_AFTER_SEC ({EXPIRE_AFTER_SEC})"
+        )
+
     if not MQTT_HOST.strip():
         errors.append("MQTT_HOST must not be empty")
 
     if not TARGET_HOST.strip():
         errors.append("TARGET_HOST must not be empty")
+
+    if DEVICE_ID != "siseli_inverter_1":
+        for name, value, legacy in (
+            ("STATE_TOPIC", STATE_TOPIC, _LEGACY_STATE_TOPIC),
+            ("AVAILABILITY_TOPIC", AVAILABILITY_TOPIC, _LEGACY_AVAILABILITY_TOPIC),
+        ):
+            if value == legacy:
+                # Never rewritten automatically -- that would silently move every
+                # entity. The user has to clear the field themselves.
+                print(
+                    f"[CONFIG WARNING] {name} is still the old default {legacy!r} while "
+                    f"DEVICE_ID is {DEVICE_ID!r}. Clear the field to derive it from the "
+                    f"device id.",
+                    flush=True,
+                )
+
+    for name, value in (("STATE_TOPIC", STATE_TOPIC), ("AVAILABILITY_TOPIC", AVAILABILITY_TOPIC)):
+        if any(ch in value for ch in "+#") or value.startswith("/") or "//" in value:
+            errors.append(f"{name} is not a valid MQTT topic: {value!r}")
+
+    if DEVICE_ID != DEVICE_ID_RAW:
+        # A warning, not an error: the sanitised value works, and refusing to start
+        # would be worse than quietly correcting it.
+        print(
+            f"[CONFIG WARNING] DEVICE_ID {DEVICE_ID_RAW!r} contains characters Home "
+            f"Assistant's MQTT discovery cannot match; using {DEVICE_ID!r} instead.",
+            flush=True,
+        )
 
     if INVERTER_COUNT < 1:
         errors.append(f"INVERTER_COUNT must be >= 1, got {INVERTER_COUNT}")
@@ -135,6 +233,27 @@ def validate_config() -> None:
                 f"[CONFIG WARNING] Cannot create state cache directory {data_dir!r}: {exc}",
                 flush=True,
             )
+
+    if UNKNOWN_DEBUG_FLAGS:
+        print(
+            f"[CONFIG WARNING] Unknown DEBUG_FLAGS ignored: {', '.join(UNKNOWN_DEBUG_FLAGS)}. "
+            f"Valid flags: {', '.join(DEBUG_FLAG_NAMES)}",
+            flush=True,
+        )
+
+    if LOG_VERBOSE_DEPRECATED:
+        print(
+            "[CONFIG WARNING] LOG_VERBOSE is deprecated and ignored; it will be removed "
+            "in 2.7.0. Use DEBUG_FLAGS with 'xray' and/or 'packets' instead.",
+            flush=True,
+        )
+
+    if _ENABLED_DEBUG_FLAGS and LOG_LEVEL_STR in {"warning", "error"}:
+        print(
+            f"[CONFIG WARNING] DEBUG_FLAGS are set but LOG_LEVEL is {LOG_LEVEL_STR!r}, "
+            f"which suppresses their output. Set LOG_LEVEL to 'info' to see them.",
+            flush=True,
+        )
 
     if errors:
         for err in errors:
