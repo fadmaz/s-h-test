@@ -635,11 +635,15 @@ class SolarParser:
         bms = SolarParser._to_float_or_none(state.get(bms_key))
         legacy = SolarParser._to_float_or_none(state.get(legacy_key))
 
-        if bms is not None and legacy is not None and legacy > 0.01:
+        if bms is not None and legacy is not None:
             scaled_legacy = legacy * factor
             bigger = max(bms, scaled_legacy)
             smaller = min(bms, scaled_legacy)
-            if smaller > 0 and bigger / smaller > 2.0:
+            # A source reading zero while the other reports current is the most
+            # informative disagreement of all, and a ratio test cannot express it.
+            one_reads_zero = smaller <= 0.01 < bigger
+            ratio_differs = smaller > 0.01 and bigger / smaller > 2.0
+            if one_reads_zero or ratio_differs:
                 # No ground truth exists: the official app displays both and they
                 # disagree too. Surfacing it beats silently picking a winner.
                 log_kv(
@@ -667,6 +671,28 @@ class SolarParser:
         # floor, not protection -- the real guards are the input range checks and the
         # freshness gates below.
         state[key] = round(max(previous, total), 6)
+
+    @staticmethod
+    def _derive_battery_status(state: Dict[str, object]) -> None:
+        """Label the battery from the same power figures the sensors publish.
+
+        Deriving it independently let the two disagree: the status came from the
+        inverter's ammeter and the power from the BMS, so a real installation showed
+        "Idle" alongside 344 W of charge. Reading the calculated power instead makes
+        that contradiction impossible rather than merely unlikely.
+        """
+        charge_w = SolarParser._to_float_or_none(state.get("c_battery_charge_power_w"))
+        discharge_w = SolarParser._to_float_or_none(state.get("c_battery_discharge_power_w"))
+        if charge_w is None or discharge_w is None:
+            # No battery data in this payload; say nothing rather than guess.
+            return
+
+        if charge_w > 0:
+            state["battery_status"] = "Charge"
+        elif discharge_w > 0:
+            state["battery_status"] = "Discharge"
+        else:
+            state["battery_status"] = "Idle"
 
     @staticmethod
     def _apply_energy_dashboard_calculations(state: Dict[str, object], now_ts: Optional[float] = None) -> None:
@@ -1554,24 +1580,10 @@ class SolarParser:
         if vals:
             state.update(SolarParser._parse_bms_capacity(vals))
 
-        # Friendly derived values / compatibility helpers
-        charge_a = state.get("bat_charge_current", _shared_state.LAST_STATE.get("bat_charge_current"))
-        discharge_a = state.get("dischg_current", _shared_state.LAST_STATE.get("dischg_current"))
-        if isinstance(charge_a, (int, float)) and float(charge_a) > 0.01:
-            state["battery_status"] = "Charge"
-        elif isinstance(discharge_a, (int, float)) and float(discharge_a) > 0.01:
-            state["battery_status"] = "Discharge"
-        elif (
-            isinstance(charge_a, (int, float))
-            and isinstance(discharge_a, (int, float))
-            and float(charge_a) <= 0.01
-            and float(discharge_a) <= 0.01
-        ):
-            # Both currents are known and effectively zero: that is arithmetic, not
-            # inference. Previously this branch keyed off mains_current_flow_direction
-            # instead, so a payload carrying only the grid block -- no battery data at
-            # all -- reported "Charge".
-            state["battery_status"] = "Idle"
+        # battery_status is derived after the energy calculation, from the same
+        # resolved figures, so the two cannot contradict each other. It previously
+        # read the inverter's own ammeter while the power sensors used the BMS, which
+        # on a real installation reported "Idle" while 344 W flowed into the battery.
 
         # Compatibility with older entity names / expectations.
         if "inverter_temperature_c" in state:
@@ -1600,6 +1612,7 @@ class SolarParser:
         # calculation, so that a payload carrying no battery data at all produces an
         # empty state dict rather than a handful of derived-from-nothing values.
         SolarParser._apply_energy_dashboard_calculations(state)
+        SolarParser._derive_battery_status(state)
 
         return state
 
