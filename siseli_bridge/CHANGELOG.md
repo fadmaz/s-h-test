@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.15] - 2026-08-21
+
+### Fixed
+
+- **The 2.6.14 logo was illegible at the size Home Assistant actually renders it.** The
+  frontend caps `logo.png` at `max-height: 40px`, so the 500×200 file rendered at exactly
+  100×40 CSS pixels — a 0.2× scale applied to every text height in the source. The
+  wordmark was set at 33px and the tagline at 16px, which landed at 6.6 and 3.2 CSS
+  pixels. The tagline was not small, it was invisible. The logo is now 760×200 with the
+  wordmark at 62px (12.4 CSS pixels rendered) and no tagline.
+- `test_the_icon_carries_alpha` asserted PNG colour type ∈ (4, 6), which rejects a
+  palette PNG — but colour type 3 carries transparency through a `tRNS` chunk. It forbade
+  an optimisation that measures 6.5× smaller for no reason. Renamed to
+  `test_the_icon_carries_transparency` and it now accepts a palette with `tRNS`, while
+  still rejecting an opaque one. Both branches are exercised.
+- The same test's docstring said alpha stops the off-white margin rendering as a pale
+  box. The margin was *cropped away* in 2.6.14, not alpha-punched; what transparency
+  actually protects is the badge's rounded corners.
+
 ## [2.6.14] - 2026-08-21
 
 ### Fixed

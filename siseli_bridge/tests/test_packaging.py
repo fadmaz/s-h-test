@@ -265,6 +265,13 @@ class TestBrandAssets(unittest.TestCase):
     These read the PNG header directly rather than going through Pillow. Pillow is not
     in the dev extras, so a Pillow-based test would skipTest on CI and pass vacuously --
     which is how the mislabelling survived in the first place.
+
+    One constraint here is NOT machine-checkable and has already been got wrong once.
+    The frontend caps the logo at `max-height: 40px`, so a 200px-tall source renders at
+    0.2x and every text height in it is multiplied by that. 2.6.14 shipped a wordmark
+    set at 33px and a tagline at 16px, which rendered at 6.6 and 3.2 CSS px -- the
+    tagline was not small, it was invisible. Cap height must be at least ~30% of the
+    canvas height. Check any new logo by resizing it to 40px tall and looking at it.
     """
 
     MAGIC = bytes((0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))
@@ -303,12 +310,25 @@ class TestBrandAssets(unittest.TestCase):
             "logo.png is a copy of icon.png again",
         )
 
-    def test_the_icon_carries_alpha(self):
-        """Without it, the off-white margin around the rounded tile renders as a pale
-        box on Home Assistant's dark theme. PNG colour type 4 is grey+alpha and 6 is
-        RGBA; 0, 2 and 3 carry no alpha channel."""
-        _, _, colour_type = self._header("icon.png")
-        self.assertIn(colour_type, (4, 6), f"icon.png is PNG colour type {colour_type}, which has no alpha")
+    def test_the_icon_carries_transparency(self):
+        """The badge has rounded corners. Without transparency behind them the corners
+        are filled with the old off-white, which reads as a pale notch on Home
+        Assistant's dark theme -- and there is no dark-mode variant to escape to, since
+        one file serves both themes.
+
+        Colour types 4 and 6 carry an alpha channel outright. Type 3 is a palette, which
+        carries transparency through a tRNS chunk instead -- accepted here because a
+        palette build of this icon is several times smaller, and rejecting it would
+        forbid that optimisation for no reason.
+        """
+        raw = (ADDON / "icon.png").read_bytes()
+        colour_type = self._header("icon.png")[2]
+        if colour_type == 3:
+            self.assertIn(b"tRNS", raw, "palette icon.png has no tRNS chunk, so it is fully opaque")
+        else:
+            self.assertIn(
+                colour_type, (4, 6), f"icon.png is PNG colour type {colour_type}, which cannot be transparent"
+            )
 
 
 class TestDockerContext(unittest.TestCase):
