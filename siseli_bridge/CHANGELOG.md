@@ -27,6 +27,14 @@ All notable changes to this project will be documented in this file.
   context root. Because the artefacts vary per machine, two developers building the
   same commit got images with different layer hashes.
 
+### Removed
+
+- `iptables` and `libcap` from the image. Nothing invokes `iptables`, `setcap` or
+  `getcap` anywhere in the add-on; the NAT redirection that once needed them is long
+  gone, and raw send/capture comes from the `NET_RAW`/`NET_ADMIN` capabilities rather
+  than from a binary. `iproute2` is kept — scapy can shell out to `ip`, and the smoke
+  test cannot prove otherwise because it runs with `AUTO_INTERCEPT=false`.
+
 ## [2.6.12] - 2026-08-21
 
 ### Added
