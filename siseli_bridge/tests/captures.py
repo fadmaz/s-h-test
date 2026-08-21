@@ -162,6 +162,11 @@ SYNTH_2ONL_IDLE = b"(04 053.4 058 000 00000 420 110007200000 00000000\r"
 SYNTH_YAVB_ABSURD_CURRENT = b"(04 1001100000000000 042.0 057.6 195.0 058 9999.0 0000.0 03041 000000\r"
 SYNTH_WDRR_RELAY_OPEN = b"(232.7 49.9 280 170 65 40 +00000 0 01000 11+00000\r"
 
+#: Hand-built. The signed power token is far wider than the five digits a real
+#: device emits, which is what the plausibility bound exists to reject: this value
+#: would otherwise be integrated into a counter that can never come back down.
+SYNTH_WDRR_ABSURD_POWER = b"(232.7 49.9 280 170 65 40 +999999999 0 11000 11+00000\r"
+
 # ---------------------------------------------------------------------------
 # NOT YET CAPTURED
 # The parser recognises 15 block keys. Device A above covers all of them except

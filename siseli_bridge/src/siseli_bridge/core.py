@@ -339,7 +339,6 @@ def packet_callback(pkt) -> None:
 
 
 PROCESS_START_TS = time.time()
-_AVAILABILITY_ONLINE = True
 ADAPTIVE_TIMEOUT_LOGGED = False
 
 
@@ -396,12 +395,23 @@ def telemetry_is_fresh(now: Optional[float] = None) -> bool:
 
 
 def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
-    """Publish availability when it changes. Returns the new state, or None."""
-    global _AVAILABILITY_ONLINE
-    fresh = telemetry_is_fresh(now)
-    if fresh == _AVAILABILITY_ONLINE:
+    """Publish availability when it changes. Returns the new state, or None.
+
+    The verdict is kept in state.py because the paho thread re-asserts it on every
+    reconnect. Edge-triggering against a core-private copy meant that once the
+    reconnect overwrote the retained topic, this function saw no transition and never
+    corrected it -- every entity read available with stale values indefinitely.
+    """
+    # Shutdown is terminal for availability. It clears RUNNING, then spends about a
+    # second restoring ARP before publishing offline, so without this an in-flight
+    # tick could republish online afterwards -- onto a client that then disconnects
+    # cleanly, which suppresses the LWT that would otherwise correct it.
+    if not _state.RUNNING:
         return None
-    _AVAILABILITY_ONLINE = fresh
+    fresh = telemetry_is_fresh(now)
+    if fresh == _state.AVAILABILITY_ONLINE:
+        return None
+    _state.AVAILABILITY_ONLINE = fresh
     publish_availability(fresh)
     log(
         "[HEALTH] Telemetry resumed; sensors available again"
@@ -500,6 +510,7 @@ def shutdown(*_args) -> None:
     restore_arp()
 
     try:
+        _state.AVAILABILITY_ONLINE = False
         publish_availability(False)
         client.disconnect()
         client.loop_stop()

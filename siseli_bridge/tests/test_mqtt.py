@@ -39,6 +39,9 @@ class _MqttTestCase(unittest.TestCase):
         ctx = isolated_state()
         ctx.__enter__()
         self.addCleanup(lambda: ctx.__exit__(None, None, None))
+        # publish_discovery now re-asserts this rather than a literal True, so the
+        # availability assertions must not depend on another file's cleanup.
+        shared_state.AVAILABILITY_ONLINE = True
 
         consts = patch_consts("src.siseli_bridge.mqtt", **TOPICS)
         consts.__enter__()

@@ -111,6 +111,37 @@ class TestSingleWriterPerKey(_ParserTestCase):
         self.assertNotIn("low_electric_lock_voltage_v", from_yavb)
         self.assertEqual(from_yavb["bms_discharge_voltage_limit_v"], 42.0)
 
+    def test_float_and_bulk_voltage_come_from_93vq_only(self):
+        """Both fell back to dHrK settings that mean something else entirely, so a
+        payload carrying dHrK without 93VQ published the parallel-mode turn-off
+        voltage as float charging voltage -- 44.0 V against a true 56.4 V."""
+        dhrk_only = SolarParser._try_ascii_schema({"dHrK": captures.BLOCK_DHRK_SETTINGS})
+        self.assertNotIn("float_v", dhrk_only)
+        self.assertNotIn("bulk_v", dhrk_only)
+        # The genuine dHrK readings are still published under their own names.
+        self.assertEqual(dhrk_only["parallel_mode_turn_off_voltage_v"], 44.0)
+        self.assertEqual(dhrk_only["return_to_mains_mode_voltage_v"], 46.0)
+
+        with_93vq = SolarParser._try_ascii_schema({
+            "dHrK": captures.BLOCK_DHRK_SETTINGS,
+            "93VQ": captures.BLOCK_93VQ_SETTINGS,
+        })
+        self.assertEqual(with_93vq["float_v"], 56.4)
+        self.assertEqual(with_93vq["bulk_v"], 56.4)
+
+    def test_max_chg_carries_the_charge_limit_not_the_grid_current(self):
+        """The alias fell back to grid_connected_current_a, a different quantity, when
+        a short 93VQ token list omitted the charge limit. Both live in 93VQ and read
+        50 A and 20 A respectively, so the value proves which source is in use."""
+        state = SolarParser._try_ascii_schema({"93VQ": captures.BLOCK_93VQ_SETTINGS})
+        self.assertEqual(state["maximum_total_charging_current_a"], 50)
+        self.assertEqual(state["grid_connected_current_a"], 20)
+        self.assertEqual(state["max_chg"], 50)
+
+        # Absent source, absent alias -- no borrowing from another block.
+        without_93vq = SolarParser._try_ascii_schema({"dHrK": captures.BLOCK_DHRK_SETTINGS})
+        self.assertNotIn("max_chg", without_93vq)
+
     def test_cell_summary_comes_from_uxjp_only(self):
         """v09K carries at most 16 cells. This bank has 32 -- the BMS reports its
         minimum at position 32 -- so any summary derived from that list describes a
@@ -154,6 +185,35 @@ class TestRangeGuards(_ParserTestCase):
         state = SolarParser._try_ascii_schema({"Yavb": captures.SYNTH_YAVB_ABSURD_CURRENT})
         self.assertNotIn("bms_charging_current_a", state)
         self.assertEqual(state["bms_discharge_current_a"], 0.0)
+
+    def test_absurd_grid_power_is_rejected(self):
+        """The only unguarded input to a total_increasing counter. _accumulate_kwh is
+        monotonic, so one malformed token latched the Energy Dashboard permanently."""
+        good = SolarParser._try_ascii_schema({"WdRR": captures.BLOCK_WDRR_NO_GRID_FLOW})
+        self.assertEqual(good["mains_wdrr_value"], 0)
+        self.assertEqual(good["mains_power_w"], 0)
+
+        with mock.patch("src.siseli_bridge.parsers.log_kv"):
+            bad = SolarParser._try_ascii_schema({"WdRR": captures.SYNTH_WDRR_ABSURD_POWER})
+        for key in ("mains_wdrr_value", "mains_wdrr_abs", "mains_power_w", "c_mains_power_w"):
+            with self.subTest(key=key):
+                self.assertNotIn(key, bad)
+        # The raw token survives as a diagnostic, exactly as bat_series_count does.
+        self.assertEqual(bad["mains_wdrr_token"], "+999999999")
+
+    def test_a_rejected_grid_value_never_reaches_the_energy_counter(self):
+        """Dropping the key must skip the grid domain rather than integrate a zero."""
+        shared_state.LAST_STATE["c_grid_import_energy_kwh"] = 46.732669
+        with mock.patch("src.siseli_bridge.parsers.log_kv"):
+            state = SolarParser._try_ascii_schema({"WdRR": captures.SYNTH_WDRR_ABSURD_POWER})
+        self.assertNotIn("c_grid_import_energy_kwh", state)
+        self.assertNotIn("c_grid_import_power_w", state)
+
+    def test_the_rejection_is_reported(self):
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            SolarParser._try_ascii_schema({"WdRR": captures.SYNTH_WDRR_ABSURD_POWER})
+        self.assertTrue(logged.called)
+        self.assertEqual(logged.call_args[0][0], "[GRID VALUE REJECTED]")
 
     def test_cell_list_stops_at_the_first_out_of_range_cell(self):
         """Skipping it renumbered every later cell, so cell_3_mv reported physical
