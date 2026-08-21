@@ -17,8 +17,30 @@ All notable changes to this project will be documented in this file.
   and had never once been built.
 - Dependabot now watches `siseli_bridge/requirements.txt` and the Home Assistant base
   image pin. Neither was watched before.
+- **`siseli_bridge/DOCS.md`** — Home Assistant renders this on the add-on's
+  **Documentation** tab. The file did not exist, so the tab was empty and users were
+  bounced out to GitHub. The reference documentation now lives there: requirements,
+  installation, every configuration option, network setup and troubleshooting.
+- A CI status badge and a licence badge on the README.
+
+### Changed
+
+- **`README.md` is a landing page** (411 lines → 125). What it is, how it works, what
+  cannot be decoded, what hardware is covered — everything operational is on the
+  Documentation tab. Tests pin the split in both directions, and assert that every
+  option in the schema is documented on the tab.
+- Links in the moved content are absolute. Supervisor renders the Documentation tab
+  inside the Home Assistant frontend, where a relative link resolves against the HA
+  origin rather than GitHub.
 
 ### Fixed
+
+- The README said "around 38 sensors read `Unknown`". It has been 45 since 2.6.1, and
+  nothing noticed for eleven releases. That count, and the 207/143 sensor totals, are
+  now derived from the registry by a test.
+- The Requirements table said 32-bit builds are "not published". Nothing is published on
+  any architecture — the add-on is built locally — so the reason `armv7`, `armhf` and
+  `i386` are unavailable is that they are not in the `arch:` key.
 
 - **Four development artefacts shipped inside every locally built image** --
   `.coverage`, `siseli_bridge.egg-info/` and two `__pycache__/` directories. Docker

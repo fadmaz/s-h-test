@@ -33,7 +33,7 @@ rather than merely missing. Several were found exactly this way.
 
 ## What makes a capture worth taking
 
-Roughly forty fields have a value in the portal and read `unknown` in the bridge. They are
+45 fields have a value in the portal and read `unknown` in the bridge. They are
 almost all flags, and in a healthy machine **every one of them reads its safe value** —
 `No`, `Off`, `Close`. A capture in that state cannot distinguish them no matter how
 carefully it is compared.
