@@ -106,6 +106,26 @@ def load_cached_state(path: str = STATE_CACHE_FILE) -> None:
                     level="warning",
                 )
 
+            # Keys this build no longer defines at all. The purge above only covers
+            # keys listed as undecodable, and that list is required to name registered
+            # sensors -- so a key deleted from SENSORS outright had no purge path: it
+            # was restored, merged into LAST_STATE, and republished in the retained
+            # group payload forever, because publish_grouped_state iterates the payload
+            # rather than the registry. c_bms_remaining_capacity_ah was deleted in
+            # 2.5.17 and was still being republished thirteen releases later, and the
+            # dbg_*_raw family still carried block text from a months-old session.
+            # Every key the parser writes is registered, so "not in SENSORS" is exactly
+            # "not produced by this build" -- no maintained list is needed.
+            removed = [key for key in cached if key not in SENSORS]
+            for key in removed:
+                cached.pop(key, None)
+            if removed:
+                log(
+                    f"[CACHE] Dropped {len(removed)} cached values for sensors this build "
+                    f"no longer defines (e.g. {', '.join(sorted(removed)[:3])})",
+                    level="warning",
+                )
+
             if RESET_ENERGY_COUNTERS:
                 for key in ENERGY_COUNTER_KEYS:
                     cached.pop(key, None)

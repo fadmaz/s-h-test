@@ -115,6 +115,40 @@ class TestLoadCachedState(unittest.TestCase):
             core.load_cached_state(path)
             self.assertEqual(shared_state.LAST_STATE["bat_v"], 53.4)
 
+    def test_keys_this_build_no_longer_defines_are_dropped(self):
+        """The undecodable purge only covers keys listed there, and that list must
+        name registered sensors -- so a key deleted from SENSORS outright had no purge
+        path at all. It was restored, merged into LAST_STATE and republished in the
+        retained group payload forever, because publish_grouped_state iterates the
+        payload rather than the registry."""
+        with isolated_state(), tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "state.json")
+            with open(path, "w") as f:
+                json.dump({
+                    "bat_v": 53.6,
+                    "c_bms_remaining_capacity_ah": None,   # deleted in 2.5.17
+                    "dbg_wdrr_raw": "231.9 49.9 280 170 65 40 +00000 0 11000 11+00000",
+                }, f)
+            shared_state.LAST_STATE.clear()
+            with mock.patch("src.siseli_bridge.core.log"):
+                core.load_cached_state(path)
+
+            self.assertEqual(shared_state.LAST_STATE["bat_v"], 53.6)
+            self.assertNotIn("c_bms_remaining_capacity_ah", shared_state.LAST_STATE)
+            self.assertNotIn("dbg_wdrr_raw", shared_state.LAST_STATE)
+
+    def test_a_registered_key_is_kept_even_with_no_value(self):
+        """util_chg has no writer but is registered, so it is the list's business and
+        not this filter's."""
+        with isolated_state(), tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "state.json")
+            with open(path, "w") as f:
+                json.dump({"util_chg": None, "bat_v": 53.6}, f)
+            shared_state.LAST_STATE.clear()
+            with mock.patch("src.siseli_bridge.core.log"):
+                core.load_cached_state(path)
+            self.assertIn("util_chg", shared_state.LAST_STATE)
+
     def test_missing_file_is_not_an_error(self):
         with isolated_state(), tempfile.TemporaryDirectory() as d:
             shared_state.LAST_STATE.clear()

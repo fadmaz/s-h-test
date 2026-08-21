@@ -167,6 +167,28 @@ class TestUndecodableSensors(unittest.TestCase):
             overlap, [], f"written by the parser yet listed as undecoded: {overlap}"
         )
 
+    def test_every_key_the_parser_writes_is_registered(self):
+        """This is what makes the cache filter in load_cached_state safe. That filter
+        drops any cached key not in SENSORS, on the reasoning that "not registered"
+        means "not produced by this build". If the parser ever wrote an unregistered
+        key, the filter would silently discard a live value on every restart -- and
+        publish_grouped_state would have been publishing it with no entity behind it.
+        """
+        parsers_src = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "src" / "siseli_bridge" / "parsers.py"
+        ).read_text(encoding="utf-8")
+
+        written = set(re.findall(r'state\["([a-z0-9_]+)"\]\s*=', parsers_src))
+        self.assertGreater(len(written), 100, "the pattern stopped matching state writes")
+
+        unregistered = sorted(written - set(SENSORS))
+        self.assertEqual(
+            unregistered,
+            [],
+            f"the parser writes keys with no registry entry: {unregistered}",
+        )
+
     def test_configured_capacity_is_named_as_a_configuration_echo(self):
         """It is BATTERY_COUNT x BATTERY_CAPACITY_PER_BATTERY_AH, not a BMS reading,
         and it sat next to bms_nominal_ah contradicting it 2x on a live install."""

@@ -213,6 +213,47 @@ class TestNoQuantityIsRelabelledAsAnother(_ParserTestCase):
         self.assertNotIn("total_number_of_grid_connection", state)
 
 
+class TestNoDecodeIsPinnedToOneDeviceConfiguration(_ParserTestCase):
+    """A guard that only passes on the reference device is a memorised constant."""
+
+    SETTINGS = (
+        "ac_charging_switch", "charging_priority_order", "working_mode", "eco",
+        "dual_output_mode", "does_machine_have_output", "grid_connection_function",
+        "input_source_prompt_function", "output_set_voltage",
+    )
+
+    def _decode(self, tail):
+        base = captures.BLOCK_93VQ_SETTINGS.decode("ascii")
+        block = base.replace("13310110230", "13310110" + tail, 1).encode("ascii")
+        return SolarParser._try_ascii_schema({"93VQ": block})
+
+    def test_the_settings_word_decodes_at_any_mains_voltage(self):
+        """The whole nine-field decode was gated on the word ending in "230", the
+        reference device's output setting. On a 120 V or 240 V inverter every one of
+        these vanished silently, with no log line."""
+        for tail in ("230", "220", "240", "120", "100"):
+            with self.subTest(output_voltage=tail):
+                state = self._decode(tail)
+                self.assertEqual(state["output_set_voltage"], int(tail))
+                for key in self.SETTINGS:
+                    self.assertIn(key, state)
+
+    def test_a_tail_that_is_not_a_voltage_decodes_nothing(self):
+        """The tail still gates the decode -- it is what confirms this is the word we
+        think it is. It just must not be compared against one device's setting."""
+        state = self._decode("999")
+        for key in self.SETTINGS:
+            with self.subTest(key=key):
+                self.assertNotIn(key, state)
+
+    def test_the_reference_values_are_unchanged(self):
+        state = self._decode("230")
+        self.assertEqual(state["working_mode"], "SBU")
+        self.assertEqual(state["charging_priority_order"], "SNU")
+        self.assertEqual(state["ac_charging_switch"], "Close")
+        self.assertEqual(state["grid_connection_function"], "Off")
+
+
 class TestDecodedFromMeasuredEvidence(_ParserTestCase):
     """The other direction: values that were missing and are now genuinely decoded."""
 

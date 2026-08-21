@@ -89,8 +89,16 @@ survivors, only **PV and load scaled by `INVERTER_COUNT`, with the BMS current t
 whole-bank** leaves a plausible loss figure — 17.7%, high but reasonable for a hybrid
 inverter running at 8% load with a second output enabled.
 
-**This is the first positive evidence for the `INVERTER_COUNT` scaling**, and it supports
-what the bridge already does.
+**This does not settle the scaling.** The same test on the repo's own `CAPTURE_TELEMETRY`
+fixture gives **110.0% efficiency** under the surviving model, and three device-A instants
+give 110%, 95% and 82% -- no coherent loss curve. The instant is *consistent with*
+`INVERTER_COUNT` scaling; it does not establish it. The most likely explanation is that
+blocks within one payload are not co-sampled, which invalidates instantaneous balance
+reasoning generally.
+
+The honest test needs no new capture: integrate `c_generation_power_w` over 24 hours and
+compare against the device's own `pv_today_kwh`. Averaging over a day removes the sampling
+noise that makes the instant test swing between 82% and 110%.
 
 ### It also supports using the BMS current over the inverter's
 

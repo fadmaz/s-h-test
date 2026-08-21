@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.11] - 2026-08-21
+
+### Fixed
+
+- **Nine Settings Sensors Vanished On Any Inverter Not Set To 230 V**: The `93VQ` settings word packs eight configuration digits followed by the configured output voltage, and the whole decode was gated on that voltage being exactly `230` -- the reference device's setting. On a 120 V, 220 V or 240 V inverter the test failed and `AC Charging Switch`, `Charging Priority Order`, `Working Mode`, `Input Source Prompt Function`, `ECO`, `Dual Output Mode`, `Does The Machine Have An Output`, `Grid Connection Function` and `Output Set Voltage` all silently produced nothing, with no log line. The tail is now validated as a plausible mains voltage rather than compared against one device's. It still gates the decode, because a tail that is not a voltage means the word is not the one the parser thinks it is.
+- **The State Cache Restored Sensors The Build No Longer Defines**: The existing purge covers only keys listed as undecodable, and that list is required to name registered sensors, so a key removed from the registry outright had no purge path at all. It was restored on every start, merged into the published state, and republished on the retained topic indefinitely, because the state publisher iterates the payload rather than the registry. On a live installation `c_bms_remaining_capacity_ah` was still being republished thirteen releases after its deletion, alongside `dbg_*_raw` values holding block text from a months-old session. Any cached key the running build does not define is now dropped and the count reported.
+
+### Added
+
+- **The Registry Invariant Is Pinned**: Every key the parser writes is asserted to have a registry entry. That is what makes the cache filter safe -- without it, a future unregistered key would be silently discarded on every restart, and would meanwhile be published with no entity behind it.
+
+### Changed
+
+- **Two Documented Claims Corrected**: The capture reference said the stale cache keys were never published, which was false. And the energy-conservation argument in both the capture and the mapping was presented as settling the `INVERTER_COUNT` scaling; the same test on the project's own `CAPTURE_TELEMETRY` fixture yields 110% efficiency, so it is consistent with that scaling but does not establish it. A 24-hour integration against the device's own daily counter is the test that would.
+
 ## [2.6.10] - 2026-08-21
 
 ### Added
