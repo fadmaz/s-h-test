@@ -178,14 +178,70 @@ class TestSingleWriterPerKey(_ParserTestCase):
         self.assertEqual(summary["bms_cell_delta_mv"], 7)
 
 
+class TestNoQuantityIsRelabelledAsAnother(_ParserTestCase):
+    """Each of these published one quantity under the name of a different one. They
+    are not missing decodes -- they were wrong ones, which is worse, because a wrong
+    value looks like a working sensor."""
+
+    def test_output_set_frequency_is_not_the_measured_frequency(self):
+        """It was out_hz rounded. The portal carries Output Frequency 49.9 Hz and
+        Output Set Frequency 50 Hz as two fields at one instant, and a sagging output
+        at 49.4 Hz would have published the user's setting as 49."""
+        state = SolarParser._try_ascii_schema({"2l0E": captures.BLOCK_2L0E_LOADED})
+        self.assertIn("out_hz", state)
+        self.assertNotIn("output_set_frequency", state)
+
+    def test_solar_charging_switch_is_not_derived_from_pv_power(self):
+        """It read "Open" if PV power was above zero, so it reported the switch closed
+        every night."""
+        state = SolarParser._try_ascii_schema({"Mpod": captures.BLOCK_MPOD_PV1_IDLE})
+        self.assertEqual(state["pv_w"], 0)
+        self.assertNotIn("solar_charging_switch", state)
+
+    def test_fan_status_is_not_derived_from_fan_speed(self):
+        """The portal carries Fan Speed, Fan Status and Abnormal Fan Speed as three
+        separate fields."""
+        state = SolarParser._try_ascii_schema({"V4W3": captures.BLOCK_V4W3_TEMPS})
+        self.assertIn("fan_1_speed", state)
+        self.assertNotIn("fan_1_status", state)
+        self.assertNotIn("fan_2_status", state)
+
+    def test_grid_connection_count_is_not_the_pv_channel_count(self):
+        """noeP token 3 reads 2 in every capture, and so do the inverter count and
+        uxJp token 2 on this device -- three unrelated quantities equalling two."""
+        state = SolarParser._try_ascii_schema({"noeP": captures.BLOCK_NOEP_PV2_ACTIVE})
+        self.assertNotIn("total_number_of_grid_connection", state)
+
+
+class TestDecodedFromMeasuredEvidence(_ParserTestCase):
+    """The other direction: values that were missing and are now genuinely decoded."""
+
+    def test_bms_average_temperature_comes_from_deci_kelvin(self):
+        """Token 8 is tenths of a Kelvin. 3041/10 - 273.15 = 30.95, digit for digit
+        what the vendor portal reports for this device."""
+        state = SolarParser._try_ascii_schema({"Yavb": captures.BLOCK_YAVB_CHARGING})
+        self.assertEqual(state["bms_avg_temp_c"], 30.95)
+
+    def test_rated_apparent_power_is_the_load_percentage_denominator(self):
+        """Constant 11000 on both devices. The owner confirms 11 kW is the maximum
+        output, and apparent_va / 11000 reproduces load_pct on every capture."""
+        state = SolarParser._try_ascii_schema({"2l0E": captures.BLOCK_2L0E_LOADED})
+        self.assertEqual(state["rated_apparent_va"], 11000)
+        self.assertEqual(
+            int(state["apparent_va"] / state["rated_apparent_va"] * 100),
+            state["load_pct"],
+        )
+
+
 class TestRangeGuards(_ParserTestCase):
-    def test_output_relay_can_report_off(self):
-        """The else branch produced None, which is stripped before publish, so the
-        relay could only ever read On."""
-        closed = SolarParser._try_ascii_schema({"WdRR": captures.BLOCK_WDRR_NO_GRID_FLOW})
-        self.assertEqual(closed["main_output_relay_status"], "On")
-        opened = SolarParser._try_ascii_schema({"WdRR": captures.SYNTH_WDRR_RELAY_OPEN})
-        self.assertEqual(opened["main_output_relay_status"], "Off")
+    def test_relay_status_is_not_taken_from_a_numeric_token(self):
+        """WdRR token 8 is a number -- it reads 11000, 08969 and 07969 across captures.
+        Taking its leading character made the 07969 payload report the relay Off while
+        the same payload reported 4055 W delivered to the load."""
+        state = SolarParser._try_ascii_schema({"WdRR": captures.BLOCK_WDRR_NO_GRID_FLOW})
+        self.assertNotIn("main_output_relay_status", state)
+        # The raw token is still published as the artefact to work from.
+        self.assertEqual(state["wdrr_status_bits"], "11000")
 
     def test_overload_percentage_is_published(self):
         """Above 100% is exactly the reading a user needs, and it was discarded --

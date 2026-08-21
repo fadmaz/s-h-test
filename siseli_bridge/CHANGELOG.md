@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.10] - 2026-08-21
+
+### Added
+
+- **BMS Average Temperature Now Works**: It has never had a value on most firmwares -- the decode read a token that only some devices append, and the bridge reported the key as unresolved on every single payload. `Yavb` token 8 holds it in tenths of a Kelvin. One real capture from a second device carries the value twice in the same block, as `02921` at token 8 and `18.95` at token 10, so the block supplies its own conversion key: `2921 / 10 - 273.15 = 18.95` exactly. On the reference device `03041` gives `30.95`, digit for digit what the vendor portal reports. Every observed value ends in `.95` because an integer deci-Kelvin minus 273.15 must.
+- **Rated Apparent Power**: `2l0E` token 6 reads a constant `11000` on every capture from both devices and is the denominator of the load percentage -- 868 VA / 11000 = 7.89%, reported as 7, and so on for every sample. The owner confirms 11 kW is the inverter's maximum output. It was published only as an opaque string named `Output Status Bits`.
+
+### Fixed
+
+- **Five Sensors Published A Different Quantity Under Their Own Name**: These were wrong decodes rather than missing ones, which is worse -- a wrong value looks like a working sensor. `main_output_relay_status` took the leading character of a token that is a number, and reported the relay `Off` in a payload that also reported 4055 W delivered to the load. `output_set_frequency` was the measured frequency rounded, so a sagging output would publish the user's setting as 49 Hz. `solar_charging_switch` was `PV power > 0`, so it reported the switch closed every night. `fan_1_status` and `fan_2_status` were `fan speed > 0`, while the vendor reports speed, status and fault as three separate fields. `total_number_of_grid_connection` read a token whose own variable name in the code was `pv_channel_count`. All are removed; every key stays registered and disabled so no retained discovery configuration is orphaned.
+
+### Changed
+
+- **Statistics For The PV Energy Counters**: `pv_today_kwh`, `pv_month_kwh` and `pv_year_kwh` declared an energy device class with no state class, so Home Assistant recorded no long-term statistics and they could not be selected in the Energy Dashboard. The three figures verified exactly against the vendor portal were the three that could not be graphed.
+- **Statistics For The BMS Capacity Sensors**: `bms_remaining_ah` and `bms_nominal_ah` are live measurements that carried no state class, so the pack's headline number had no history.
+- **Cell Voltages Declare A Device Class**: All nineteen millivolt sensors now declare `voltage`. The unit is unchanged, so no statistics repair is triggered.
+- **Two Names Corrected**: `WdRR Status Bits` is renamed `WdRR Token 8 Raw`, because its value is a number and not a bit field. `Output Starting/Ending Time` gain the `Dual` the vendor uses and the sibling `Dual Output Mode` already carries. Friendly names only -- entity IDs and history are unaffected.
+
+### Note
+
+`enabled_by_default` applies to newly discovered entities only. Existing installations keep the five removed sensors enabled; they simply stop receiving updates, and the cached value is purged on start rather than republished. Delete or hide them.
+
 ## [2.6.9] - 2026-08-21
 
 ### Fixed
