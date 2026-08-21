@@ -48,6 +48,34 @@ class _MqttTestCase(unittest.TestCase):
         self.addCleanup(lambda: consts.__exit__(None, None, None))
 
 
+class TestWireIdentityOnTheDeviceCard(_MqttTestCase):
+    """The bridge decodes a firmware version the vendor portal itself leaves blank, and
+    it was reachable only as a diagnostic sensor. Home Assistant shows sw_version and
+    serial_number on the device page header, which is where a user looks."""
+
+    def test_the_main_device_carries_what_the_wire_reports(self):
+        shared_state.LAST_STATE.update({
+            "firmware_version": "0010.11",
+            "model_code": "HPVINV04",
+            "dtu_id": "34545375423553743260",
+        })
+        info = mqtt_mod.device_info("main")
+        self.assertEqual(info["sw_version"], "0010.11")
+        self.assertEqual(info["hw_version"], "HPVINV04")
+        self.assertEqual(info["serial_number"], "34545375423553743260")
+        # model stays the user's configured value; nothing configured is overridden.
+        self.assertEqual(info["model"], TOPICS["MODEL_NAME"])
+
+    def test_unknown_identity_is_omitted_rather_than_guessed(self):
+        """A first-ever start has no cache, so discovery goes out without them and the
+        next reconnect republishes it with them."""
+        shared_state.LAST_STATE.clear()
+        info = mqtt_mod.device_info("main")
+        for key in ("sw_version", "hw_version", "serial_number"):
+            with self.subTest(key=key):
+                self.assertNotIn(key, info)
+
+
 class TestTopicDerivation(_MqttTestCase):
     def test_main_group_uses_the_configured_topics_verbatim(self):
         self.assertEqual(mqtt_mod.device_id_for_group("main"), "inv1")

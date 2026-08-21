@@ -1,6 +1,6 @@
 # ☀️ Siseli Inverter Bridge for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-2.6.11-blue.svg)](siseli_bridge/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.6.12-blue.svg)](siseli_bridge/CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
 A Home Assistant add-on that reads your Siseli-compatible solar inverter **locally**, by
@@ -101,7 +101,7 @@ Enable **Watchdog** and **Start on boot**, then start the add-on. Within a coupl
 minutes the log should show:
 
 ```
---- Siseli Inverter Bridge 2.6.11 ---
+--- Siseli Inverter Bridge 2.6.12 ---
 [ARP] Interception ACTIVE: 192.168.x.x <-> 192.168.x.x
 [HA MQTT] Connected to ...
 [HA MQTT] Discovery published
@@ -192,18 +192,18 @@ opened a socket. You can ignore the `[CONFIG WARNING]` about it.
 
 ## What you get
 
-**203 sensors across 7 devices.** 146 are enabled on a fresh install; the rest are
+**207 sensors across 7 devices.** 143 are enabled on a fresh install; the rest are
 disabled by default and can be switched on individually in Home Assistant.
 
 | Device | Sensors | Covers |
 |---|---|---|
-| **Main** | 12 | The calculated power and energy sensors, state of charge, mode |
+| **Main** | 14 | The calculated power and energy sensors, state of charge, mode |
 | **Battery** | 45 | Voltage, current, capacity, charge/discharge state, charging setpoints |
 | **BMS** | 25 | Per-cell voltages (16), pack min/max/delta, nominal and remaining Ah, limits |
 | **Grid** | 30 | Voltage, frequency, flow direction, mains loss thresholds, relay status |
-| **Load** | 21 | Active and apparent power, load percentage, output voltage and frequency |
+| **Load** | 22 | Active and apparent power, load percentage, output voltage and frequency |
 | **PV** | 18 | Per-string voltage/current/power, temperatures, daily/monthly/yearly/total energy |
-| **Diagnostics** | 52 | Fan speeds, temperatures, firmware, settings echoes, raw block dumps |
+| **Diagnostics** | 53 | Fan speeds, temperatures, firmware, settings echoes, raw block dumps |
 
 The Battery, BMS, Grid, Load, PV and Diagnostics devices are nested under Main in Home
 Assistant, so they appear together on one page.
@@ -212,6 +212,23 @@ Assistant, so they appear together on one page.
 battery charge/discharge power and energy, grid import power and energy, generation power,
 load power, and the configured bank capacity. The three `kWh` counters are
 `total_increasing`, so they feed the Home Assistant Energy Dashboard directly.
+
+### Which sensors are per-inverter and which are system totals
+
+This matters on a parallel installation. Sensors prefixed **`c_`** are calculated and
+scaled by `INVERTER_COUNT`; everything else is exactly what one inverter reported.
+
+| | |
+|---|---|
+| `generation_power_w`, `load_w`, `pv_today_kwh`, `pv_total_kwh` | per inverter, as the vendor app shows them |
+| `c_generation_power_w`, `c_load_w`, `c_generation_energy_kwh`, `c_load_energy_kwh` | system total |
+
+The `c_*` energy counters are integrated from the `c_*` power sensors, so each is on the
+same basis as its power partner. The device's own `pv_*_kwh` counters are left exactly as
+the inverter reports them, so they continue to match the vendor app.
+
+**If you are on a single inverter**, `INVERTER_COUNT` is 1 and the two columns are
+identical.
 
 For a value-by-value map against the vendor portal — every block, every token position,
 and the exact list of fields the bridge cannot yet decode — see

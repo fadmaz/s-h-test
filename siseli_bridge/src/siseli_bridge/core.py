@@ -63,7 +63,9 @@ from .config import STATE_CACHE_FILE
 ENERGY_COUNTER_KEYS = (
     "c_battery_charge_energy_kwh",
     "c_battery_discharge_energy_kwh",
+    "c_generation_energy_kwh",
     "c_grid_import_energy_kwh",
+    "c_load_energy_kwh",
 )
 
 

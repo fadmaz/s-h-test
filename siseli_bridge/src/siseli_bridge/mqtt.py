@@ -58,6 +58,28 @@ def availability_topic_for_group(group: str) -> str:
     return f"{AVAILABILITY_TOPIC}/{group}"
 
 
+def wire_identity() -> Dict[str, object]:
+    """Identity the inverter reports about itself, for the HA device registry.
+
+    Home Assistant shows these on the device page header, which is where a user looks
+    for a firmware version -- the bridge decodes one the vendor portal itself leaves
+    blank, and it was buried in a diagnostic sensor. model is left as the configured
+    MODEL_NAME because the user chose it; the wire's model code goes to hw_version so
+    nothing configured is overridden.
+
+    Read from the shared state, which load_cached_state has already populated by the
+    time discovery is published. On a first-ever start there is no cache and these are
+    simply omitted; the next reconnect republishes discovery with them.
+    """
+    snapshot = _state.snapshot_state()
+    fields = {
+        "sw_version": snapshot.get("firmware_version"),
+        "hw_version": snapshot.get("model_code"),
+        "serial_number": snapshot.get("dtu_id"),
+    }
+    return {k: str(v) for k, v in fields.items() if v}
+
+
 def device_info(group: str) -> Dict[str, object]:
     if group == "main":
         return {
@@ -65,6 +87,7 @@ def device_info(group: str) -> Dict[str, object]:
             "name": DEVICE_NAME,
             "manufacturer": MANUFACTURER,
             "model": MODEL_NAME,
+            **wire_identity(),
         }
     group_title = get_group_title(group)
     group_device_id = device_id_for_group(group)
