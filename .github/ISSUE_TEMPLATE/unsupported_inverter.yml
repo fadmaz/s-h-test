@@ -1,5 +1,6 @@
 name: Unsupported inverter / sensors not decoding
 description: Data arrives but few or no sensors get values
+title: "[Decoding]: "
 labels: ["decoding"]
 body:
   - type: markdown
@@ -49,3 +50,10 @@ body:
       description: |
         The values the app displays at the same moment, so the decode can be checked
         against ground truth. A screenshot is fine.
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have scrubbed the `topic=` values from the capture — they contain my device serial.
+          required: true

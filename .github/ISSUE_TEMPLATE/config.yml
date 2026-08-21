@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, or something not working
+    url: https://github.com/fadmaz/siseli-ha/discussions
+    about: Ask here first. Most "it shows Unavailable" reports are answered by the troubleshooting guide below.
+  - name: Troubleshooting guide
+    url: https://github.com/fadmaz/siseli-ha/blob/main/siseli_bridge/DOCS.md#troubleshooting
+    about: Entities unavailable, no entities at all, wrong values, and how to take a debug capture.
+  - name: Report a security vulnerability
+    url: https://github.com/fadmaz/siseli-ha/security/advisories/new
+    about: Private disclosure. Please do not open a public issue for a vulnerability.

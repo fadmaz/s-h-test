@@ -1,11 +1,69 @@
 name: Bug report
 description: Something behaves incorrectly
+title: "[Bug]: "
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: entities showing **Unavailable** shortly after they appear is
+        almost always the telemetry timeout, and is covered in the
+        [troubleshooting guide](https://github.com/fadmaz/siseli-ha/blob/main/siseli_bridge/DOCS.md#troubleshooting).
   - type: input
     id: version
     attributes:
       label: Add-on version
+      description: The version Supervisor shows on the add-on page, not the one in the log banner.
+      placeholder: e.g. 2.6.13
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: e.g. 2026.8.1
+    validations:
+      required: true
+  - type: dropdown
+    id: install_type
+    attributes:
+      label: Installation type
+      options:
+        - Home Assistant OS
+        - Home Assistant Supervised
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options:
+        - aarch64
+        - amd64
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: brand
+    attributes:
+      label: Inverter brand
+      description: Everything on this list uses the Siseli cloud platform. Pick "Other" if yours is not here.
+      options:
+        - PowMr
+        - Solar of Things
+        - LUMINOUS NEO
+        - SUN WISE
+        - Queen Tech
+        - LIB Life
+        - Sun house
+        - LeiLing
+        - SunSaviour
+        - ECOmenic
+        - HC solar
+        - 沐能低碳
+        - Taico
+        - Other
     validations:
       required: true
   - type: textarea
@@ -19,12 +77,23 @@ body:
     attributes:
       label: Add-on log
       description: |
-        Settings -> Add-ons -> Siseli Inverter Bridge -> Log. Scrub the `topic=` values
-        if present; they contain your device serial.
+        Settings → Add-ons → Siseli Inverter Bridge → Log. Include the startup banner and
+        several minutes of running output — the `[Config]` lines it prints are usually
+        what identifies the problem.
       render: text
+    validations:
+      required: true
   - type: textarea
     id: config
     attributes:
       label: Relevant configuration
-      description: Please remove your MQTT password.
       render: yaml
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have removed my MQTT password from anything I pasted.
+          required: true
+        - label: I have scrubbed the `topic=` values from the log — they contain my device serial.
+          required: true
