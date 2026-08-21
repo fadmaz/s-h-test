@@ -8,6 +8,7 @@ def sensor(name: str, **kwargs) -> Dict[str, object]:
 
 SENSORS: Dict[str, Dict[str, object]] = {
     # Info / identity
+    "dtu_id": sensor("Device Info - Collector ID", icon="mdi:identifier", entity_category="diagnostic"),
     "model_code": sensor("Device Info - Device Type", icon="mdi:identifier", entity_category="diagnostic"),
     "output_model": sensor("Device Info - Output Model", icon="mdi:transmission-tower", entity_category="diagnostic", enabled_by_default=False),
     "mode": sensor("Device Info - Mode", icon="mdi:transmission-tower-export", enabled_by_default=False),
@@ -65,6 +66,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "mains_power_w": sensor("Grid Status - Mains Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-export"),
     "c_mains_power_w": sensor("Grid Status - Calculated Mains Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-export"),
     "c_grid_import_power_w": sensor("Grid Status - Calculated Grid Import Power", unit="W", device_class="power", state_class="measurement", icon="mdi:transmission-tower-import"),
+    "c_load_energy_kwh": sensor("Load Status - Calculated Consumed Energy", unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:home-lightning-bolt-outline"),
     "c_grid_import_energy_kwh": sensor("Grid Status - Calculated Grid Imported Energy", unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:transmission-tower-import"),
     "mains_apparent_va": sensor("Grid Status - Mains Apparent Power", unit="VA", device_class="apparent_power", state_class="measurement", icon="mdi:flash"),
 
@@ -79,6 +81,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
 
     # PV page
     "generation_power_w": sensor("PV Panel Status - Generation Power", unit="W", device_class="power", state_class="measurement", icon="mdi:solar-power"),
+    "c_generation_energy_kwh": sensor("PV Panel Status - Calculated Generation Energy", unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:solar-power"),
     "c_generation_power_w": sensor("PV Panel Status - Calculated Generation Power", unit="W", device_class="power", state_class="measurement", icon="mdi:solar-power"),
     "pv_v": sensor("PV Panel Status - PV Voltage", unit="V", device_class="voltage", state_class="measurement", icon="mdi:solar-panel"),
     "pv_current_a": sensor("PV Panel Status - PV Current", unit="A", device_class="current", state_class="measurement", icon="mdi:current-dc"),

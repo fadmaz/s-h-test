@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.12] - 2026-08-21
+
+### Added
+
+- **The Calculated Energy Family Is Complete**: Battery charge, battery discharge and grid import each had an integrated kWh counter; generation and load did not. Two of the four scaled power sensors therefore had no energy partner on the same basis, and the device's own `pv_*_kwh` counters could not fill the gap because they are per-inverter while `c_generation_power_w` is a system total. `Calculated Generation Energy` and `Calculated Consumed Energy` integrate their scaled power exactly as the existing three do, each with its own clock and gated on its power being present in the payload.
+- **The Inverter's Own Identity On The Device Card**: Home Assistant shows `sw_version`, `hw_version` and `serial_number` on the device page header, and the bridge decodes a firmware version the vendor portal itself leaves blank -- it was reachable only as a diagnostic sensor. The configured `MODEL_NAME` is left alone, so nothing a user chose is overridden.
+- **Collector ID**: The MQTT topic the inverter publishes under carries a twenty-digit collector id, and the vendor portal's Serial Number is its first ten digits. It is published as a diagnostic and used as the device serial. The portal's trailing `-1` is a device index that appears nowhere on the wire and is not synthesised.
+
+### Changed
+
+- **One Integration Clock Per Domain, In One Dict**: Adding a calculated energy counter needed a new module-level timestamp for each domain. They now live in a single mapping, which is also one thing for the test isolation helper to save rather than a growing list.
+- **README Says Which Sensors Are Per-Inverter**: On a parallel installation `c_*` sensors are system totals and everything else is what one inverter reported. That was only implied by a naming convention, and a user comparing `c_generation_power_w` against `pv_today_kwh` had no way to know they are different quantities.
+
+### Note
+
+`c_generation_energy_kwh` integrates the scaled power while `pv_today_kwh` is the device's own per-inverter counter, so after twenty-four hours their ratio is `INVERTER_COUNT` if the scaling is right and 1.0 if it is not. That is the measurement which settles the open scaling question, and it now needs no helper to be configured by hand.
+
 ## [2.6.11] - 2026-08-21
 
 ### Fixed

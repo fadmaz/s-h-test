@@ -131,8 +131,7 @@ def isolated_state():
     saved_discovery = shared_state.DISCOVERY_PUBLISHED
     saved_flows = dict(parser_mod.FLOW_STATES)
     saved_topics = dict(parser_mod.SEEN_MQTT_TOPICS)
-    saved_energy_battery = parser_mod.LAST_ENERGY_TS_BATTERY
-    saved_energy_grid = parser_mod.LAST_ENERGY_TS_GRID
+    saved_energy_clocks = dict(parser_mod.LAST_ENERGY_TS)
     saved_publish_ts = parser_mod.LAST_PUBLISH_TS
     saved_pending = parser_mod.PENDING_PUBLISH
     saved_evict = parser_mod._FLOW_EVICT_COUNTER
@@ -153,8 +152,8 @@ def isolated_state():
         parser_mod.FLOW_STATES.update(saved_flows)
         parser_mod.SEEN_MQTT_TOPICS.clear()
         parser_mod.SEEN_MQTT_TOPICS.update(saved_topics)
-        parser_mod.LAST_ENERGY_TS_BATTERY = saved_energy_battery
-        parser_mod.LAST_ENERGY_TS_GRID = saved_energy_grid
+        parser_mod.LAST_ENERGY_TS.clear()
+        parser_mod.LAST_ENERGY_TS.update(saved_energy_clocks)
         parser_mod.LAST_PUBLISH_TS = saved_publish_ts
         parser_mod.PENDING_PUBLISH = saved_pending
         parser_mod._FLOW_EVICT_COUNTER = saved_evict

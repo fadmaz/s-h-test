@@ -27,8 +27,7 @@ class _ParserTestCase(unittest.TestCase):
         ctx.__enter__()
         self.addCleanup(lambda: ctx.__exit__(None, None, None))
         shared_state.LAST_STATE.clear()
-        parser_module.LAST_ENERGY_TS_BATTERY = None
-        parser_module.LAST_ENERGY_TS_GRID = None
+        parser_module.LAST_ENERGY_TS.clear()
 
 
 class TestNoFabricatedValues(_ParserTestCase):
@@ -341,6 +340,55 @@ class TestRangeGuards(_ParserTestCase):
         self.assertNotIn("cell_3_mv", state)
 
 
+class TestCalculatedEnergyFamily(_ParserTestCase):
+    """Battery and grid had integrated counters; generation and load did not, so two
+    of the four scaled power sensors had no energy partner on the same basis. The
+    device's own pv_*_kwh counters are per-inverter and cannot fill that role."""
+
+    def _run_an_hour(self, **power):
+        now = 1000.0
+        with mock.patch("src.siseli_bridge.parsers.log_kv"):
+            for _ in range(13):  # the first call only establishes the baseline
+                state = dict(power)
+                SolarParser._apply_energy_dashboard_calculations(state, now_ts=now)
+                shared_state.LAST_STATE.update(state)
+                now += 300.0
+        return state
+
+    def test_generation_energy_integrates_the_scaled_power(self):
+        state = self._run_an_hour(c_generation_power_w=4110)
+        self.assertAlmostEqual(state["c_generation_energy_kwh"], 4.110, places=3)
+
+    def test_load_energy_integrates_the_scaled_power(self):
+        state = self._run_an_hour(c_load_w=1796)
+        self.assertAlmostEqual(state["c_load_energy_kwh"], 1.796, places=3)
+
+    def test_each_domain_keeps_its_own_clock(self):
+        """A shared clock plus per-domain gating loses energy: a payload carrying only
+        one domain would consume the interval another was waiting for."""
+        with mock.patch("src.siseli_bridge.parsers.log_kv"):
+            SolarParser._apply_energy_dashboard_calculations({"c_load_w": 100}, now_ts=0.0)
+            SolarParser._apply_energy_dashboard_calculations({"c_load_w": 100}, now_ts=60.0)
+            self.assertEqual(parser_module.LAST_ENERGY_TS.get("load"), 60.0)
+            self.assertIsNone(parser_module.LAST_ENERGY_TS.get("generation"))
+
+            state = {"c_generation_power_w": 600}
+            SolarParser._apply_energy_dashboard_calculations(state, now_ts=60.0)
+            SolarParser._apply_energy_dashboard_calculations(state, now_ts=120.0)
+        # 600 W across the full 60 s the generation clock waited, not a truncated slice.
+        self.assertAlmostEqual(
+            state["c_generation_energy_kwh"], 600 * 60 / 3_600_000, places=6
+        )
+
+    def test_a_payload_without_the_power_writes_no_energy(self):
+        """Same gating rule as battery and grid: evidence in this payload or nothing."""
+        with mock.patch("src.siseli_bridge.parsers.log_kv"):
+            state = {"mains_wdrr_value": 100}
+            SolarParser._apply_energy_dashboard_calculations(state, now_ts=0.0)
+        self.assertNotIn("c_generation_energy_kwh", state)
+        self.assertNotIn("c_load_energy_kwh", state)
+
+
 class TestEnergyIntegrationWindow(_ParserTestCase):
     """The integrator must credit the interval the inverter actually reported over.
 
@@ -359,16 +407,16 @@ class TestEnergyIntegrationWindow(_ParserTestCase):
         parser_module.ENERGY_DT_CLAMP_LOGGED = False
 
     def test_a_real_300s_interval_is_credited_in_full(self):
-        parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+        parser_module.LAST_ENERGY_TS["battery"] = 1000.0
         self.assertEqual(SolarParser._energy_dt_seconds("battery", 1300.0), 300.0)
 
     def test_the_observed_600s_gap_is_credited_in_full(self):
-        parser_module.LAST_ENERGY_TS_GRID = 1000.0
+        parser_module.LAST_ENERGY_TS["grid"] = 1000.0
         self.assertEqual(SolarParser._energy_dt_seconds("grid", 1600.0), 600.0)
 
     def test_an_abnormal_jump_is_still_bounded(self):
         """A clock jump or a suspended process must not credit a fabricated block."""
-        parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+        parser_module.LAST_ENERGY_TS["battery"] = 1000.0
         with mock.patch("src.siseli_bridge.parsers.log_kv"):
             dt = SolarParser._energy_dt_seconds("battery", 1000.0 + 6 * 3600)
         self.assertEqual(dt, float(parser_module.ENERGY_MAX_DT_SEC))
@@ -393,7 +441,7 @@ class TestEnergyIntegrationWindow(_ParserTestCase):
         live capture. The old 60 s bound produced 1.097 kWh for the same hour.
         """
         state = {}
-        parser_module.LAST_ENERGY_TS_BATTERY = None
+        parser_module.LAST_ENERGY_TS.clear()
         now = 1000.0
         for _ in range(13):  # first call is the baseline, so 12 integration steps
             dt = SolarParser._energy_dt_seconds("battery", now)
@@ -404,10 +452,10 @@ class TestEnergyIntegrationWindow(_ParserTestCase):
         self.assertAlmostEqual(state["c_battery_discharge_energy_kwh"], 5.486, places=3)
 
     def test_an_abnormal_gap_is_reported_once(self):
-        parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+        parser_module.LAST_ENERGY_TS["battery"] = 1000.0
         with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
             SolarParser._energy_dt_seconds("battery", 1000.0 + 6 * 3600)
-            parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+            parser_module.LAST_ENERGY_TS["battery"] = 1000.0
             SolarParser._energy_dt_seconds("battery", 1000.0 + 6 * 3600)
         self.assertEqual(logged.call_count, 1)
 
@@ -416,7 +464,7 @@ class TestEnergyIntegrationWindow(_ParserTestCase):
         from it is what caused the undercount, and it is Supervisor-pinned, so no
         default change could have fixed an existing install."""
         with patch_consts("src.siseli_bridge.parsers", UPDATE_INTERVAL_SEC=1):
-            parser_module.LAST_ENERGY_TS_BATTERY = 1000.0
+            parser_module.LAST_ENERGY_TS["battery"] = 1000.0
             self.assertEqual(SolarParser._energy_dt_seconds("battery", 1300.0), 300.0)
 
 
@@ -433,13 +481,13 @@ class TestEnergyDomainGating(_ParserTestCase):
         """The real second payload from a live install. It carries no battery voltage
         or current at all, yet it published a changed energy total."""
         shared_state.LAST_STATE.update({"bat_v": 53.4, "bms_charging_current_a": 29.1})
-        parser_module.LAST_ENERGY_TS_BATTERY = 100.0
+        parser_module.LAST_ENERGY_TS["battery"] = 100.0
 
         state = SolarParser._try_ascii_schema(dict(captures.CAPTURE_IDENTITY))
 
         self.assertEqual([k for k in state if k.startswith("c_")], [])
         self.assertEqual(
-            parser_module.LAST_ENERGY_TS_BATTERY, 100.0, "battery clock must not advance"
+            parser_module.LAST_ENERGY_TS.get("battery"), 100.0, "battery clock must not advance"
         )
 
     def test_the_two_clocks_are_independent(self):
@@ -448,8 +496,8 @@ class TestEnergyDomainGating(_ParserTestCase):
         SolarParser._apply_energy_dashboard_calculations({"mains_wdrr_value": 100}, now_ts=0.0)
         SolarParser._apply_energy_dashboard_calculations({"mains_wdrr_value": 100}, now_ts=60.0)
 
-        self.assertEqual(parser_module.LAST_ENERGY_TS_GRID, 60.0)
-        self.assertIsNone(parser_module.LAST_ENERGY_TS_BATTERY)
+        self.assertEqual(parser_module.LAST_ENERGY_TS.get("grid"), 60.0)
+        self.assertIsNone(parser_module.LAST_ENERGY_TS.get("battery"))
 
         state = {"bat_v": 50.0, "bms_charging_current_a": 10.0}
         SolarParser._apply_energy_dashboard_calculations(state, now_ts=60.0)
@@ -521,8 +569,7 @@ class TestPublishThrottle(unittest.TestCase):
         self.addCleanup(lambda: ctx.__exit__(None, None, None))
         shared_state.LAST_STATE.clear()
         shared_state.DISCOVERY_PUBLISHED = True
-        parser_module.LAST_ENERGY_TS_BATTERY = None
-        parser_module.LAST_ENERGY_TS_GRID = None
+        parser_module.LAST_ENERGY_TS.clear()
         parser_module.PENDING_PUBLISH = False
 
         self.publish_state = mock.Mock()

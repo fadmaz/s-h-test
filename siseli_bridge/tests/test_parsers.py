@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 
-from src.siseli_bridge.parsers import decode_remaining_length, extract_mqtt_packets_from_stream, validate_publish_packet, SolarParser
+from src.siseli_bridge.parsers import decode_remaining_length, dtu_id_from_topic, extract_mqtt_packets_from_stream, validate_publish_packet, SolarParser
 from src.siseli_bridge import parsers as parser_module
 from src.siseli_bridge import state as shared_state
 from tests import captures
@@ -156,8 +156,7 @@ class TestParsers(unittest.TestCase):
             "c_battery_discharge_energy_kwh": 2.0,
             "c_grid_import_energy_kwh": 3.0,
         })
-        parser_module.LAST_ENERGY_TS_BATTERY = 100.0
-        parser_module.LAST_ENERGY_TS_GRID = 100.0
+        parser_module.LAST_ENERGY_TS.update(battery=100.0, grid=100.0, generation=100.0, load=100.0)
 
         state = {
             "bat_v": 50.0,
@@ -183,8 +182,7 @@ class TestParsers(unittest.TestCase):
             "c_battery_discharge_energy_kwh": 0.0,
             "c_grid_import_energy_kwh": 0.0,
         })
-        parser_module.LAST_ENERGY_TS_BATTERY = 0.0
-        parser_module.LAST_ENERGY_TS_GRID = 0.0
+        parser_module.LAST_ENERGY_TS.update(battery=0.0, grid=0.0, generation=0.0, load=0.0)
 
         # These now have to arrive in the payload. Reading currents from the cache is
         # what let a stale BMS reading override a fresh inverter one.
@@ -211,8 +209,7 @@ class TestParsers(unittest.TestCase):
             "c_battery_discharge_energy_kwh": 0.8,
             "c_grid_import_energy_kwh": 0.9,
         })
-        parser_module.LAST_ENERGY_TS_BATTERY = None
-        parser_module.LAST_ENERGY_TS_GRID = None
+        parser_module.LAST_ENERGY_TS.clear()
 
         state = {
             "bat_v": 52.0,
@@ -228,3 +225,22 @@ class TestParsers(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestDtuIdFromTopic(unittest.TestCase):
+    """The collector id travels in the topic of the payload being parsed, so it is
+    per-payload evidence like any block field. The portal's Serial Number is its first
+    ten digits plus a "-1" device index that appears nowhere on the wire, so the raw
+    id is reported and nothing is synthesised."""
+
+    def test_a_real_topic_yields_the_collector_id(self):
+        self.assertEqual(
+            dtu_id_from_topic("dtu/34545375423553743260/pub/event/dev_prop_post"),
+            "34545375423553743260",
+        )
+
+    def test_anything_not_that_shape_yields_nothing(self):
+        for topic in ("dtu/x/pub", "other/34545375423553743260/pub", "dtu", "", None,
+                      "dtu/123/pub"):
+            with self.subTest(topic=topic):
+                self.assertIsNone(dtu_id_from_topic(topic))

@@ -109,8 +109,10 @@ ENERGY_DT_CLAMP_LOGGED = False
 #: monotonic, so one malformed token latches the Energy Dashboard permanently.
 MAINS_POWER_MAX_W = 100000
 GRID_VALUE_REJECTED_LOGGED = False
-LAST_ENERGY_TS_BATTERY: Optional[float] = None
-LAST_ENERGY_TS_GRID: Optional[float] = None
+#: Integration clock per energy domain. A dict rather than one global per domain, so
+#: adding a calculated energy counter does not need a new module-level name -- and so
+#: the test isolation helper has one thing to save instead of a growing list.
+LAST_ENERGY_TS: Dict[str, float] = {}
 _FLOW_EVICT_COUNTER: int = 0
 _FLOW_EVICT_INTERVAL: int = 200  # Prune stale TCP flows every N state lookups.
 
@@ -152,6 +154,26 @@ def is_reasonable_topic(topic: str) -> bool:
     if not PRINTABLE_ASCII_RE.match(topic):
         return False
     return "/" in topic
+
+
+def dtu_id_from_topic(topic):
+    """The collector id, from the topic segment the inverter publishes under.
+
+    Topics look like ``dtu/34545375423553743260/pub/event/dev_prop_post``. The vendor
+    portal shows the same twenty digits as the DTU, and its Serial Number is the first
+    ten of them -- but the portal's trailing ``-1`` is a device index that appears
+    nowhere on the wire, so only the raw id is reported and nothing is synthesised.
+    Returns None unless the topic really has that shape.
+    """
+    if not topic:
+        return None
+    parts = str(topic).split("/")
+    if len(parts) < 2 or parts[0].lower() != "dtu":
+        return None
+    candidate = parts[1]
+    if not candidate.isdigit() or not (8 <= len(candidate) <= 32):
+        return None
+    return candidate
 
 
 def validate_publish_packet(packet: bytes) -> bool:
@@ -641,21 +663,12 @@ class SolarParser:
         The first call for a domain establishes a baseline and returns 0 -- there is
         no interval to integrate over yet.
         """
-        global LAST_ENERGY_TS_BATTERY, LAST_ENERGY_TS_GRID
-
-        previous = LAST_ENERGY_TS_BATTERY if domain == "battery" else LAST_ENERGY_TS_GRID
+        previous = LAST_ENERGY_TS.get(domain)
+        LAST_ENERGY_TS[domain] = now_ts
         if previous is None:
-            if domain == "battery":
-                LAST_ENERGY_TS_BATTERY = now_ts
-            else:
-                LAST_ENERGY_TS_GRID = now_ts
             return 0.0
 
         dt_seconds = max(0.0, now_ts - previous)
-        if domain == "battery":
-            LAST_ENERGY_TS_BATTERY = now_ts
-        else:
-            LAST_ENERGY_TS_GRID = now_ts
 
         max_dt_seconds = SolarParser._energy_max_dt()
         if dt_seconds <= max_dt_seconds:
@@ -836,6 +849,28 @@ class SolarParser:
             SolarParser._accumulate_kwh(
                 state, "c_grid_import_energy_kwh", grid_import_power_w, dt_seconds
             )
+
+        # Generation and load complete the calculated energy family. Battery and grid
+        # already had integrated counters, so scaled power had a scaled energy partner
+        # in two domains out of four -- and the device's own pv_*_kwh counters are
+        # per-inverter, which is a different basis from c_generation_power_w and cannot
+        # be compared with it. Each domain is gated on its power being present in THIS
+        # payload and keeps its own clock, exactly as battery and grid do.
+        if "c_generation_power_w" in state:
+            generation_w = SolarParser._to_float_or_none(state.get("c_generation_power_w"))
+            if generation_w is not None and generation_w >= 0:
+                dt_seconds = SolarParser._energy_dt_seconds("generation", now)
+                SolarParser._accumulate_kwh(
+                    state, "c_generation_energy_kwh", generation_w, dt_seconds
+                )
+
+        if "c_load_w" in state:
+            load_power_w = SolarParser._to_float_or_none(state.get("c_load_w"))
+            if load_power_w is not None and load_power_w >= 0:
+                dt_seconds = SolarParser._energy_dt_seconds("load", now)
+                SolarParser._accumulate_kwh(
+                    state, "c_load_energy_kwh", load_power_w, dt_seconds
+                )
 
     @staticmethod
     def _safe_b64decode(value: str) -> Optional[bytes]:
@@ -1816,6 +1851,12 @@ class SolarParser:
 
             state = SolarParser._try_ascii_schema(blocks)
             if state:
+                # The collector id travels in the MQTT topic of this very payload, so
+                # it is per-payload evidence like any block field.
+                dtu_id = dtu_id_from_topic(source_topic)
+                if dtu_id:
+                    state["dtu_id"] = dtu_id
+
                 clean_state = SolarParser._drop_none_values(state)
                 if not clean_state:
                     if LOG_UNPARSED_PUBLISH:
