@@ -13,6 +13,7 @@ including the ones present in only one.
 | Capture | Device state | Notes |
 |---|---|---|
 | [2026-08-21 13:41 — charging](2026-08-21_1341_charging.md) | Off grid, charging, PV 2.055 kW, SOC 57% | Simultaneous to the second. 202 parameters, none disagree. |
+| [2026-08-21 23:41 — discharging](2026-08-21_2341_discharging.md) | Off grid, discharging 27.3 A, PV 0, SOC 38% | Simultaneous to the second. Pairs with the row above: retires two hypotheses, confirms three decodes. |
 
 ## Why these exist
 
@@ -42,12 +43,26 @@ The captures that would move things forward:
 
 | State | What it would settle |
 |---|---|
-| **Discharging** | The `Yavb` 16-bit flag word — allow-charge and allow-discharge should flip |
+| **One switch toggled alone** | Which `eo8w[2]` position is the charging light and which is the charging main switch. Three positions move together today, so nothing can be assigned. Toggle exactly one in the vendor app. |
 | **On grid** | The mains flags and the grid-import path, which has never been exercised |
-| **After dark, PV = 0** | Whether `Solar Charging Switch` is a real setting or tracks PV power |
-| **A fan at 0%** | Whether `V4W3`[7] is the fan status, and what `Abnormal Fan Speed` reads |
+| **A fan at 0%** | Whether `V4W3[7]` is the fan status, and what `Abnormal Fan Speed` reads |
 | **During any fault** | The sixteen fault flags, all of which read `No` in every capture so far |
-| **A different device** | A single inverter, or a 120 V / 60 Hz unit, would separate several fields that happen to share a value on this install |
+| **A different device** | A 120 V / 60 Hz unit would separate several fields that happen to share a value on this install |
+
+Two entries that used to be on this list are done, and one was never going to work:
+
+- **Discharging** — taken 2026-08-21 23:41. It did *not* move the `Yavb` flag word, and it
+  could never have: *Allow Charging* and *Allow Discharge* are permissions the pack grants,
+  not a description of what it is doing, and both read `Yes` in every state.
+- **After dark, PV = 0** — same capture. `Solar Charging Switch` reads `Close` with the
+  string dark, and `noeP[3]` moved `2` → `0`, so that token tracks PV activity rather than
+  topology. Nothing there is a settings field.
+- **A single-inverter capture** is not needed for `total_number_of_grid_connection`; the
+  dark-PV reading already settled it.
+
+The one open question that no capture will answer is the `INVERTER_COUNT` scaling. It
+needs a photograph of an inverter's rating plate, or a clamp meter on the AC output —
+see the discharging capture for why.
 
 See [`../sensor_mapping_verified.md`](../sensor_mapping_verified.md) for the running
 analysis these captures feed.

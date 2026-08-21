@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.6.16] - 2026-08-22
 
 ### Changed
 
@@ -13,12 +13,50 @@ All notable changes to this project will be documented in this file.
   silently run their code in this repository's CI. Still `v2`: the rename shipped as
   `v2.21.1` and there is no `v3`.
 
+### Fixed
+
+- **Generation power was published from cached state, not from the payload in hand.**
+  `pv_w` and `pv2_power_w` fell back to `LAST_STATE`, so this device's identity payload —
+  which carries no PV block at all — republished the previous payload's PV power every
+  time, and `c_generation_energy_kwh` integrated over it. Harmless while `Mpod` and `noeP`
+  keep arriving; the moment they stop at dusk the last daylight figure would be held and
+  the counter would accrue invented kWh all night. Generation was the only one of the four
+  energy domains resting on a cached value, against the rule that a value is published
+  only when this payload carries evidence for it — and against the comment on the
+  accumulator itself.
+- The test that was supposed to catch this seeded only the battery keys into `LAST_STATE`,
+  so it passed while generation kept its fallback. It now seeds the PV keys too, and fails
+  against the old code.
+
+### Changed
+
+- The `INVERTER_COUNT` sanity check in `DOCS.md` was a false alarm on a correctly
+  configured install: run against a real capture with 2 kW of sun it is 40% out, because
+  conversion losses and a parallel inverter's own array both land in the gap. It now says
+  to run the comparison only at night with PV at zero, where it discriminates cleanly, and
+  points at a clamp meter as the measurement that actually settles the scaling.
+
 ### Added
 
+- `captures/2026-08-21_2341_discharging.md` — the same device ten hours after the charging
+  capture, in the opposite battery state, again simultaneous with the vendor portal. It
+  confirms three decodes that no earlier capture could test, because the fields were pinned
+  at zero: `dischg_current`, `bms_discharge_current_a`, and that `bms_charge_current_limit_a`
+  is not a constant.
 - A test asserting `ci.yml` produces exactly the check names that branch protection on
   `main` requires. The two are coupled with nothing connecting them — rename a job or
   change a matrix axis and every PR blocks forever waiting on a check that no longer
   exists, with no error pointing at the cause.
+
+### Removed
+
+- Two decode hypotheses, refuted by pairing the two captures. **`Yavb[1]` is not the BMS
+  flag word** — byte-identical in both while the BMS currents swapped ends, and carrying
+  three set bits against four affirmative portal flags, so one-digit-per-flag fails
+  arithmetically however it is assigned. Twelve sensors were recorded against it.
+  **`eo8w[1]` is not the light-status word** — byte-identical while Charging Light Status
+  went Flicker to Off. Also settled: `noeP[3]` tracks PV2 activity, not topology, so the
+  note asking for a single-inverter capture to confirm it is obsolete.
 
 ## [2.6.15] - 2026-08-21
 

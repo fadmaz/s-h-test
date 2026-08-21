@@ -218,8 +218,15 @@ Battery power is handled differently: the BMS reports the **whole bank** already
 used unscaled. When the bridge has to fall back to the inverter's own ammeter it scales
 that by `INVERTER_COUNT` instead, so both sources stay on one basis.
 
-A quick sanity check on your own data: generation + battery discharge − battery charge
-should roughly equal load. If it does not, `INVERTER_COUNT` is probably wrong.
+A sanity check on your own data, but **only run it at night, off grid, with PV at zero**:
+battery discharge power should exceed load by the inverter's conversion loss — expect a
+ratio around 1.1, and treat anything near 2.0 as a sign `INVERTER_COUNT` is wrong.
+
+Do not run it while PV is producing. Tried against a real capture at 13:41 with 2 kW of
+sun, the same comparison is 40% out on a correctly configured install, because
+conversion losses and the twin inverter's own array both land in the gap. It reports a
+fault that is not there. The only measurement that settles the scaling outright is a
+clamp meter on the AC output compared against `c_load_w`.
 
 For the configured bank capacity sensor, set `BATTERY_COUNT` and
 `BATTERY_CAPACITY_PER_BATTERY_AH` to the number of packs and the Ah printed on one of
