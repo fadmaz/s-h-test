@@ -13,10 +13,104 @@ version `10.11`, protocol `MH2089635`. Rated power **11 kW**. Two inverters in p
 (`Parallel Role: Host`, `Total Number Of Grid Connection: 2`), 2 × 300 Ah battery bank,
 one live PV string on the **second** MPPT input.
 
-> **Timestamps differ.** The log capture ends at inverter clock `05:17`; the portal was
-> read at `05:34`. Slow-moving values (settings, limits, identifiers) are directly
-> comparable. Fast-moving ones (power, current, temperature) will differ, and a mismatch
-> there is **not** evidence of a decode error. Rows where that matters are marked.
+> **A simultaneous reading now exists.** The tables below were built from readings 17
+> minutes apart, so rows marked ⏱ differ for timing reasons and not because of a decode
+> error. [Section 0](#0-simultaneous-verification) supersedes them: a bridge publish and
+> a portal read taken at the same second, on 2026-08-21 at 13:41:00.
+
+---
+
+## 0. Simultaneous verification
+
+Bridge publish `13:41:00`, portal `UpdateTime 13:41:00`, both reporting inverter clock
+`08:46`. No timing gap. Add-on 2.6.10, mid-morning, charging at 2 kW of PV.
+
+**Every comparable value matched exactly — fourteen for fourteen.**
+
+| Field | Portal | Bridge | |
+|---|---|---|---|
+| BMS Average Temperature | `34.95 °C` | `34.95` | the new deci-Kelvin decode |
+| Output DC Component | `7` | `7` | |
+| Output Apparent Power | `966 VA` | `966` | |
+| Output Active Power | `0.898 kW` | `898` | |
+| Output Load Percent | `8 %` | `8` | |
+| Generation Power | `2.055 kW` | `2055` | |
+| BUS Voltage | `419 V` | `419.0` | |
+| Battery Voltage | `53.6 V` | `53.6` | |
+| BMS Charging Current | `29.6 A` | `29.6` | |
+| Battery Charging Current | `3 A` | `3.0` | the other ammeter |
+| Remaining Capacity | `171.9 A` | `171.9` | |
+| Inductor Current | `8.5 A` | `8.5` | |
+| Inverter Temperature | `50 °C` | `50.0` | |
+| Min Voltage Cell Position | `ID:0(17)` | `17` | moved from 32 — a real pack position |
+
+### `bms_avg_temp_c` is confirmed with no timing gap
+
+`Yavb`[8] = `03081` → `3081/10 - 273.15 = 34.95`, and the portal reports `34.95 °C` at
+the same second. Third independent confirmation, and the only one with zero timing gap.
+
+### `output_dc_comp` was never wrong
+
+Portal `7`, bridge `7`. The earlier `3` against `32` was **entirely a timing artefact**.
+This is closed — there is no scale factor and nothing to fix.
+
+### The rated power, twice more
+
+```
+apparent 966 / 11000  =  8.78%   ->  load_pct 8      portal: 8 %
+daily 5.802 kWh / 11 kW = 0.527  ->  Peak Hours 0.52  portal: 0.52
+```
+
+### The BMS describes one pack, not the bank
+
+```
+remaining 171.9 / nominal 299.8 = 57.3%      SOC reported = 57 %
+```
+
+Internally consistent, and it settles what `bms_nominal_ah` means: the BMS's own view is
+a single ~300 Ah pack. `c_bms_total_capacity_ah` reads 600 Ah because it is a
+configuration echo of `BATTERY_COUNT × BATTERY_CAPACITY_PER_BATTERY_AH`. The two are
+answering different questions, not contradicting each other.
+
+### Energy conservation settles the scaling question
+
+`PV in = load out + battery charge`, at one instant, off-grid so no other source:
+
+| Assumption | In | Out | Gap |
+|---|---|---|---|
+| nothing scaled | 2055 W | 2485 W | **−430 W — impossible** |
+| PV & load ×2, BMS whole-bank | 4110 W | 3383 W | +727 W (17.7% losses) |
+| PV & load ×2, BMS ×2 | 4110 W | 4969 W | **−859 W — impossible** |
+| nothing scaled, inverter ammeter | 2055 W | 1059 W | +996 W (48.5%) |
+| PV & load ×2, inverter ammeter ×2 | 4110 W | 2118 W | +1992 W (48.5%) |
+
+Two of the five require energy from nowhere and are ruled out outright. Of the
+survivors, only **PV and load scaled by `INVERTER_COUNT`, with the BMS current taken as
+whole-bank** leaves a plausible loss figure — 17.7%, high but reasonable for a hybrid
+inverter running at 8% load with a second output enabled.
+
+**This is the first positive evidence for the `INVERTER_COUNT` scaling**, and it supports
+what the bridge already does.
+
+### It also supports using the BMS current over the inverter's
+
+Implied battery charge if PV and load are unscaled: `2055 − 898 = 1157 W`, i.e. **21.6 A**
+at 53.6 V. The BMS says 29.6 A; the inverter's own ammeter says 3.0 A. The BMS figure is
+close; the inverter's is off by a factor of seven. The bridge uses the BMS figure, and
+the same held in the evening discharge sample where it balanced to 1.3%.
+
+The `[ENERGY SOURCE DISAGREEMENT]` warning still fires and should stay — there is still
+no ground truth, only a strong lean.
+
+### What did not move
+
+`eo8w`[1] `B010000000000`, `Yavb`[1] `1001100000000000`, `V4W3`[7] `11`, `2ONL`[6]
+`110007200000` and `93VQ`[3] `13310110230` are byte-identical to every earlier capture.
+The fan speeds moved 50% → 30% within this session while the portal reported Fan Status
+`Open` throughout, so there is still no capture with a fan at 0%.
+
+Every flag question in [section 5](#5-what-the-bridge-cannot-decode-yet) remains open, and
+still needs a capture in a different device state.
 
 ---
 
@@ -388,10 +482,8 @@ like a working sensor.
 All five keys stay registered and disabled, so no retained discovery config is orphaned.
 
 
-**⚠ `output_dc_comp` — portal `3`, bridge `32`.** Earlier in the same capture the bridge
-read `8`. The portal's value is a single digit while the bridge's is two. Possibly a
-scale factor, possibly just a fast-moving value at a different instant. Needs a
-simultaneous reading to settle.
+**~~`output_dc_comp`~~ — RESOLVED.** The simultaneous reading has both at `7`. The earlier
+`3` against `32` was purely the 17-minute gap. No scale factor, nothing to fix.
 
 **⚠ Scaling: the portal does not agree with itself.** At the portal's own instant:
 
