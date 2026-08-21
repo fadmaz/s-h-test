@@ -28,7 +28,7 @@ SENSORS: Dict[str, Dict[str, object]] = {
     "c_battery_discharge_energy_kwh": sensor("Battery Status - Calculated Battery Discharge Energy", unit="kWh", device_class="energy", state_class="total_increasing", icon="mdi:battery-arrow-down"),
     "bat_series_count": sensor("Battery Status - Battery Number In Series", state_class="measurement", icon="mdi:numeric"),
     "battery_status": sensor("Battery Status - Battery Status", icon="mdi:battery-sync"),
-    "battery_type": sensor("Battery Status - Battery Type", icon="mdi:battery-unknown"),
+    "battery_type": sensor("Battery Status - Battery Type", icon="mdi:battery-unknown", enabled_by_default=False),
     "c_bms_total_capacity_ah": sensor("Battery Status - Configured Battery Bank Capacity", unit="Ah", state_class="measurement", icon="mdi:battery-high"),
 
     # BMS page
@@ -240,6 +240,7 @@ UNDECODED_SENSOR_KEYS = frozenset(
         "abnormal_low_pv_power",
         "abnormal_temperature_sensor",
         "battery_not_connected",
+        "battery_type",
         "battery_voltage_higher",
         "bms_allow_charging_flag",
         "bms_allow_discharge_flag",

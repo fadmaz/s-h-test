@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.9] - 2026-08-21
+
+### Fixed
+
+- **Battery Type Reported A Value Nothing On The Wire Carries**: `battery_type` was originally a constant, `LIA`, published whenever a battery block existed. Removing that in 2.6.1 left a narrower guess behind -- publish `2ONL` token 6 as the pack chemistry if it happens not to be a number -- and on real hardware that token is `110007200000`, a twelve-digit status field, so the guess never fired and the original constant simply survived in `/data/state.json`. On a live installation it still read `LIA` eight releases after the code that invented it was deleted. The guess is removed, the key is listed as undecodable, and the cached value is now purged on start.
+- **Battery Status Had The Same Guess One Token Earlier**: `2ONL` token 5 was published as the battery status if it was not numeric, for a token that is the bus voltage. It could only ever fire on a payload where the calculated power was unavailable, which is exactly when a guess is least defensible. Status is derived from the calculated power alone, as 2.6.4 intended.
+
+### Changed
+
+- **`Battery Type` Is Disabled By Default**: It joins the other sensors with no decode path. It stays registered, so an inverter that does carry the value can have it enabled once a capture proves where it lives.
+
+### Added
+
+- **The Undecodable List Is Checked Against The Parser**: The test that kept decoded keys off that list compared against five hardcoded names, which is why `battery_type` sat on the wrong side of it for several releases. It now scans every state write in `parsers.py`.
+
 ## [2.6.8] - 2026-08-21
 
 ### Fixed
