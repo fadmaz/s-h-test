@@ -255,6 +255,51 @@ class TestDocumentedCountsAreCurrent(unittest.TestCase):
         self.assertIn(f"{enabled} enabled", self.readme)
 
 
+class TestRequiredStatusChecks(unittest.TestCase):
+    """Branch protection on main pins a list of required check names, and GitHub derives
+    those names from ci.yml -- `<job id>` for a plain job, `<job id> (<matrix values>)`
+    for a matrix one. The two are coupled with nothing connecting them: rename a job or
+    change a matrix axis and every PR blocks forever, waiting on a check that no longer
+    exists, with no error that points at the cause.
+
+    Keep this list in step with the rule at
+    Settings -> Branches -> main -> Require status checks. Changing one without the
+    other is the failure this exists to catch.
+    """
+
+    REQUIRED = {
+        "test (3.9)",
+        "test (3.11)",
+        "test (3.12)",
+        "lint",
+        "addon-lint",
+        "smoke (amd64, ubuntu-24.04)",
+        "smoke (aarch64, ubuntu-24.04-arm)",
+    }
+
+    def test_ci_produces_exactly_the_protected_check_names(self):
+        jobs = _load_yaml(ROOT / ".github" / "workflows" / "ci.yml")["jobs"]
+        produced = set()
+        for job_id, job in jobs.items():
+            matrix = (job.get("strategy") or {}).get("matrix")
+            if not matrix:
+                produced.add(job_id)
+                continue
+            if "include" in matrix:
+                combos = [tuple(str(v) for v in entry.values()) for entry in matrix["include"]]
+            else:
+                axis = next(iter(matrix.values()))
+                combos = [(str(value),) for value in axis]
+            produced.update(f"{job_id} ({', '.join(combo)})" for combo in combos)
+
+        self.assertEqual(
+            produced,
+            self.REQUIRED,
+            "ci.yml no longer produces the checks branch protection requires -- update the "
+            "protection rule and this list together",
+        )
+
+
 class TestBrandAssets(unittest.TestCase):
     """Supervisor finds icon.png and logo.png by filename convention -- nothing in
     config.yaml names them, and until 2.6.14 nothing in the test suite did either. Both

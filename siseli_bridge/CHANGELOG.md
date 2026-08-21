@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- CI uses `frenck/action-app-linter@v2`. The action was renamed from
+  `action-addon-linter` in August 2026, when Home Assistant renamed add-ons to apps.
+  The old reference still resolved, but only through GitHub's rename redirect — which
+  stops working the day anyone creates a repository at the vacated name, and would then
+  silently run their code in this repository's CI. Still `v2`: the rename shipped as
+  `v2.21.1` and there is no `v3`.
+
+### Added
+
+- A test asserting `ci.yml` produces exactly the check names that branch protection on
+  `main` requires. The two are coupled with nothing connecting them — rename a job or
+  change a matrix axis and every PR blocks forever waiting on a check that no longer
+  exists, with no error pointing at the cause.
+
 ## [2.6.15] - 2026-08-21
 
 ### Fixed
