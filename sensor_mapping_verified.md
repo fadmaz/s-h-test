@@ -1,7 +1,9 @@
 # Verified sensor mapping — HPVINV04
 
-A second mapping, built independently of [`sensor_mapping.md`](sensor_mapping.md), which
-is kept as-is. This one is assembled from two sources captured on the same day:
+The current mapping. It **supersedes**
+[`sensor_mapping.md`](sensor_mapping.md), which is kept as a record of what the bridge
+published around 2.6.0. This one is built independently, from two sources captured on the
+same day:
 
 - **The wire** — a full debug capture from add-on 2.6.8, with every block and every token
   position recorded (`DEBUG_FLAGS` all on, 2026-08-21).

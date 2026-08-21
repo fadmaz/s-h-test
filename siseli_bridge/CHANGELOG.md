@@ -52,6 +52,20 @@ All notable changes to this project will be documented in this file.
 - The Requirements table said 32-bit builds are "not published". Nothing is published on
   any architecture — the add-on is built locally — so the reason `armv7`, `armhf` and
   `i386` are unavailable is that they are not in the `arch:` key.
+- `run.sh` fell back to `'Siseli Inverter'` for `DEVICE_NAME` and `MODEL_NAME` while
+  `config.yaml` ships `'Siseli Inverter 1'`. Only reachable when `bashio::config` returns
+  empty, but they disagreed. `run.sh` was the outlier; the shipped default is unchanged,
+  because changing it would rename the device on every new install.
+- `CONTRIBUTING.md`'s capture procedure asked for `LOG_LEVEL: debug`, where the issue
+  template, `captures/README.md` and the Documentation tab all ask for Debug Flags with
+  `LOG_LEVEL: info`. CONTRIBUTING was the outlier and gave the worse advice — `debug`
+  floods the log with everything, where the flags select the block lines you want.
+- `CONTRIBUTING.md` never mentioned `captures/`, so there were two capture procedures and
+  one of them was undiscoverable.
+- `sensor_mapping.md` was titled *"100% Verified Mapping"* while 61 of its 193 rows are
+  `(Static)`, `(Hidden)` or presets that were never decoded from the wire. Retitled as
+  superseded, with the supersession now reciprocal — the newer file pointed back, the
+  older one did not point forward.
 
 - **Four development artefacts shipped inside every locally built image** --
   `.coverage`, `siseli_bridge.egg-info/` and two `__pycache__/` directories. Docker
