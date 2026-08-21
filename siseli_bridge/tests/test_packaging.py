@@ -255,6 +255,62 @@ class TestDocumentedCountsAreCurrent(unittest.TestCase):
         self.assertIn(f"{enabled} enabled", self.readme)
 
 
+class TestBrandAssets(unittest.TestCase):
+    """Supervisor finds icon.png and logo.png by filename convention -- nothing in
+    config.yaml names them, and until 2.6.14 nothing in the test suite did either. Both
+    were JPEG files carrying a .png extension, and byte-identical to each other, for the
+    project's whole history. Content sniffing meant they rendered anyway, which is
+    exactly why nobody noticed.
+
+    These read the PNG header directly rather than going through Pillow. Pillow is not
+    in the dev extras, so a Pillow-based test would skipTest on CI and pass vacuously --
+    which is how the mislabelling survived in the first place.
+    """
+
+    MAGIC = bytes((0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))
+    ASSETS = ("icon.png", "logo.png")
+
+    def _header(self, name):
+        """Return (width, height, colour_type) from the IHDR chunk, which a valid PNG
+        is required to place first: 8 bytes of magic, a 4-byte length, the 'IHDR' tag,
+        then width and height as big-endian uint32."""
+        raw = (ADDON / name).read_bytes()
+        self.assertEqual(raw[:8], self.MAGIC, f"{name} is not a PNG")
+        self.assertEqual(raw[12:16], b"IHDR", f"{name} has no leading IHDR chunk")
+        width = int.from_bytes(raw[16:20], "big")
+        height = int.from_bytes(raw[20:24], "big")
+        return width, height, raw[25]
+
+    def test_both_assets_are_actually_png(self):
+        """The extension was a lie about the container for the project's whole history."""
+        for name in self.ASSETS:
+            with self.subTest(asset=name):
+                self._header(name)
+
+    def test_the_icon_is_square_and_the_logo_is_not(self):
+        """Home Assistant renders the icon as a square badge in the add-on list and the
+        logo as a wider brand image on the add-on's own page. A square logo is what you
+        get when one file has been copied over the other."""
+        width, height, _ = self._header("icon.png")
+        self.assertEqual(width, height, f"the icon must be square, got {width}x{height}")
+        width, height, _ = self._header("logo.png")
+        self.assertGreater(width, height, f"the logo must be landscape, got {width}x{height}")
+
+    def test_the_two_assets_are_not_the_same_file(self):
+        self.assertNotEqual(
+            (ADDON / "icon.png").read_bytes(),
+            (ADDON / "logo.png").read_bytes(),
+            "logo.png is a copy of icon.png again",
+        )
+
+    def test_the_icon_carries_alpha(self):
+        """Without it, the off-white margin around the rounded tile renders as a pale
+        box on Home Assistant's dark theme. PNG colour type 4 is grey+alpha and 6 is
+        RGBA; 0, 2 and 3 carry no alpha channel."""
+        _, _, colour_type = self._header("icon.png")
+        self.assertIn(colour_type, (4, 6), f"icon.png is PNG colour type {colour_type}, which has no alpha")
+
+
 class TestDockerContext(unittest.TestCase):
     """Docker matches .dockerignore with filepath.Match semantics, where `*` does not
     cross `/`. A bare `__pycache__/` therefore matched only the context root, and

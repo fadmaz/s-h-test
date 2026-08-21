@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.14] - 2026-08-21
+
+### Fixed
+
+- **`icon.png` and `logo.png` were JPEG files carrying a `.png` extension**, and
+  byte-identical to each other, for the project's whole history. Browsers and the Home
+  Assistant frontend sniff content, so they rendered anyway — which is why it went
+  unnoticed. Both are now real PNGs.
+- The icon's off-white margin rendered as a pale box on Home Assistant's dark theme. It
+  is now cropped to the badge with a transparent surround, so the rounded corners
+  composite cleanly on any theme, at 256×256. The frontend caps the icon at a 40×40 CSS
+  pixel box, so that is 6.4× headroom for high-DPI displays and no more.
+
+### Changed
+
+- **`logo.png` is now a 500×200 landscape brand image** — the badge with a wordmark —
+  instead of a copy of the square icon. Home Assistant renders the icon as a small
+  square badge in the add-on list and the logo as a wider image on the add-on's own
+  page; a square logo was never right for the second. Wordmark set in DejaVu Sans.
+- `README.md` references `icon.png` for its right-floated badge. It referenced
+  `logo.png`, which at `width="140"` would now render as a 140×56 strip.
+
+### Added
+
+- `TestBrandAssets` pins all of it: both files are real PNGs, the icon is square, the
+  logo is landscape, the two are not the same file, and the icon carries an alpha
+  channel. It reads the PNG `IHDR` header directly rather than through Pillow, which is
+  not in the dev extras — a Pillow-based test would `skipTest` on CI and pass vacuously,
+  which is the failure mode that let the mislabelling survive.
+
 ## [2.6.13] - 2026-08-21
 
 ### Added
