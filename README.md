@@ -213,7 +213,9 @@ battery charge/discharge power and energy, grid import power and energy, generat
 load power, and the configured bank capacity. The three `kWh` counters are
 `total_increasing`, so they feed the Home Assistant Energy Dashboard directly.
 
-For a value-by-value map against the official app, see
+For a value-by-value map against the vendor portal — every block, every token position,
+and the exact list of fields the bridge cannot yet decode — see
+[`sensor_mapping_verified.md`](sensor_mapping_verified.md). An earlier map is kept at
 [`sensor_mapping.md`](sensor_mapping.md).
 
 ---
