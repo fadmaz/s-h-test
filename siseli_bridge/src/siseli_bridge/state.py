@@ -41,6 +41,16 @@ TELEMETRY_INTERVALS: Deque[float] = collections.deque(maxlen=8)
 #: Set once the stale-discovery sweep has run in this process.
 DISCOVERY_CLEANED: bool = False
 
+#: What the availability watchdog last told the broker. It lives here because two
+#: threads write the availability topic: the watchdog on its own thread, and the paho
+#: thread re-asserting it after a reconnect (the retained LWT fires on an unclean
+#: drop, so something must restore it). The watchdog is edge-triggered, so when the
+#: reconnect published a literal True instead of consulting this flag, the two
+#: disagreed permanently and every entity read available with stale values.
+#: Reach it as ``_state.AVAILABILITY_ONLINE``. A ``from .state import`` binds a copy
+#: and reintroduces exactly the bug documented above for RUNNING.
+AVAILABILITY_ONLINE: bool = True
+
 
 def observed_telemetry_interval() -> float:
     """Largest recent gap between decoded payloads; 0.0 until two have arrived.

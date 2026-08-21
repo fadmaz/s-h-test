@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.6.8] - 2026-08-21
+
+### Fixed
+
+- **An MQTT Reconnect Marked A Stale Bridge As Available Again**: Reconnecting republished availability as a literal `online`, which is what restores it after an unclean drop. The watchdog only acts on changes, and it tracked its verdict in a variable no other module could see, so once a reconnect overwrote the retained topic the two disagreed permanently. Any Mosquitto restart or network blip during a quiet period left every entity reporting its last decoded values as live, indefinitely, with nothing in the log. The verdict now lives in shared state and the reconnect re-asserts it rather than a literal.
+- **One Malformed Grid Reading Could Latch The Energy Dashboard**: The WdRR signed power token was the only unguarded input to a `total_increasing` counter, and the accumulator is monotonic, so an implausible value could never come back down and survived every restart. It is now bounded by the width of the field itself, and a rejection is reported as `[GRID VALUE REJECTED]`.
+- **Float And Bulk Charging Voltage Borrowed A Different Quantity**: When the block carrying them was absent, `float_v` and `bulk_v` fell back to the parallel-mode turn-off voltage and the return-to-mains threshold, from a different block entirely. Measured on real captures that published 44.0 V and 46.0 V where the true readings are 56.4 V. `max_chg` had the same shape. An alias is now absent when its source is absent, like everything else in the parser.
+- **The Startup Banner Named A Stale Release**: `run.sh` printed a hardcoded version that froze at 2.6.5 while the add-on shipped 2.6.7, so every log contradicted the banner `core.py` prints seconds later. A log pasted into a bug report named a release two versions old. The line is removed and `tests/test_packaging.py` now forbids a version literal there outright.
+
+### Changed
+
+- **Shutdown Is Terminal For Availability**: The watchdog returns immediately once the bridge is stopping, so an in-flight tick cannot republish `online` over the `offline` that shutdown sends on a connection it then closes cleanly, which suppresses the last will.
+
+### Added
+
+- **Reconnect Regression Tests**: The suite drives the watchdog and the MQTT connect callback in order and asserts the retained availability payload at each step. Nothing previously combined the two, which is how this survived.
+
 ## [2.6.7] - 2026-08-20
 
 ### Fixed

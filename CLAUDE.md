@@ -124,6 +124,15 @@ energy while the whole suite passed. The observed cadence is a fixture in
 trap above. If you add a bound that fires during normal operation, log it — the
 energy clamp fired on every payload in total silence.
 
+**Shared flags live in `state.py` and are reached through the module alias.** Two
+user-visible faults have now come from a second writer holding its own copy of one
+value: `RUNNING` was defined in `mqtt.py` and imported by value into `core`, so
+`shutdown()` rebound only its own copy; then the availability verdict lived privately
+in `core.py` while `mqtt.on_connect` re-asserted a literal `True` over it, and the
+edge-triggered watchdog could never take it back. If two threads write one topic, the
+value they both consult belongs in `state.py`, accessed as `_state.NAME` — never
+`from .state import NAME`, which binds a copy and reintroduces the bug.
+
 **`gh` defaults to the upstream fork.** Always pass `--repo fadmaz/siseli-ha`.
 
 ## Verification

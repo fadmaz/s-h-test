@@ -101,6 +101,14 @@ PENDING_PUBLISH: bool = False
 # clock and the battery integrator would never be credited for that interval.
 #: One-shot guard so an abnormal gap is reported once, not per payload.
 ENERGY_DT_CLAMP_LOGGED = False
+
+#: Plausibility bound on the WdRR signed power token, derived from the field itself:
+#: it is five digits plus a sign, so a real reading can never exceed 99999. The bound
+#: exists because this token is the only unguarded input to a total_increasing energy
+#: counter -- every neighbouring field is range-checked -- and _accumulate_kwh is
+#: monotonic, so one malformed token latches the Energy Dashboard permanently.
+MAINS_POWER_MAX_W = 100000
+GRID_VALUE_REJECTED_LOGGED = False
 LAST_ENERGY_TS_BATTERY: Optional[float] = None
 LAST_ENERGY_TS_GRID: Optional[float] = None
 _FLOW_EVICT_COUNTER: int = 0
@@ -1254,11 +1262,26 @@ class SolarParser:
         if len(vals) >= 7:
             state["mains_wdrr_token"] = vals[6]
             mains_signed = SolarParser._to_int(vals[6])
-            if mains_signed is not None:
+            if mains_signed is not None and -MAINS_POWER_MAX_W <= mains_signed <= MAINS_POWER_MAX_W:
                 state["mains_wdrr_value"] = mains_signed
                 state["mains_wdrr_abs"] = abs(mains_signed)
                 state["mains_power_w"] = abs(mains_signed)
                 state["c_mains_power_w"] = SolarParser._scale_main_power(abs(mains_signed))
+            elif mains_signed is not None:
+                # Dropped rather than clamped: the energy calculation keys off the
+                # presence of mains_wdrr_value, so this cleanly skips the grid domain
+                # for this payload instead of integrating a fabricated figure.
+                global GRID_VALUE_REJECTED_LOGGED
+                if not GRID_VALUE_REJECTED_LOGGED:
+                    GRID_VALUE_REJECTED_LOGGED = True
+                    log_kv(
+                        "[GRID VALUE REJECTED]",
+                        level="warning",
+                        token=vals[6][:32],
+                        parsed=mains_signed,
+                        max_abs=MAINS_POWER_MAX_W,
+                    )
+                mains_signed = None
 
         if len(vals) >= 8:
             state["mains_flow_code"] = vals[7]
@@ -1650,23 +1673,23 @@ class SolarParser:
         # read the inverter's own ammeter while the power sensors used the BMS, which
         # on a real installation reported "Idle" while 344 W flowed into the battery.
 
-        # Compatibility with older entity names / expectations.
+        # Compatibility with older entity names / expectations. Each alias has exactly
+        # one source carrying the same quantity. Three of them used to fall back to an
+        # unrelated setting when the source block was absent -- float_v to the
+        # parallel-mode turn-off voltage, bulk_v to the return-to-mains threshold, both
+        # from a different block entirely. Payload block sets vary, so on a real device
+        # that published 44.0 V and 46.0 V as float and bulk charging voltage. An alias
+        # is absent when its source is absent, like everything else here.
         if "inverter_temperature_c" in state:
             state["bat_temp"] = state["inverter_temperature_c"]
         if "maximum_total_charging_current_a" in state:
             state["max_chg"] = state["maximum_total_charging_current_a"]
-        elif "grid_connected_current_a" in state:
-            state["max_chg"] = state["grid_connected_current_a"]
         if "bms_discharge_voltage_limit_v" in state:
             state["cut_v"] = state["bms_discharge_voltage_limit_v"]
         if "float_charging_voltage_v" in state:
             state["float_v"] = state["float_charging_voltage_v"]
-        elif "parallel_mode_turn_off_voltage_v" in state:
-            state["float_v"] = state["parallel_mode_turn_off_voltage_v"]
         if "strong_charging_voltage_v" in state:
             state["bulk_v"] = state["strong_charging_voltage_v"]
-        elif "return_to_mains_mode_voltage_v" in state:
-            state["bulk_v"] = state["return_to_mains_mode_voltage_v"]
         if state.get("mains_current_flow_direction") is not None:
             state["mains_flow_state"] = state["mains_current_flow_direction"]
         # battery_type is decoded from the 2ONL block only (see above). It was

@@ -139,6 +139,8 @@ def isolated_state():
     saved_telemetry_ts = shared_state.LAST_TELEMETRY_TS
     saved_intervals = list(shared_state.TELEMETRY_INTERVALS)
     saved_clamp_logged = parser_mod.ENERGY_DT_CLAMP_LOGGED
+    saved_availability = shared_state.AVAILABILITY_ONLINE
+    saved_grid_rejected = parser_mod.GRID_VALUE_REJECTED_LOGGED
     try:
         yield
     finally:
@@ -160,6 +162,8 @@ def isolated_state():
         shared_state.TELEMETRY_INTERVALS.clear()
         shared_state.TELEMETRY_INTERVALS.extend(saved_intervals)
         parser_mod.ENERGY_DT_CLAMP_LOGGED = saved_clamp_logged
+        shared_state.AVAILABILITY_ONLINE = saved_availability
+        parser_mod.GRID_VALUE_REJECTED_LOGGED = saved_grid_rejected
 
 
 # ---------------------------------------------------------------- fake broker

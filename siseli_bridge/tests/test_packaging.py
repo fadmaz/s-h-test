@@ -54,6 +54,18 @@ class TestVersionConsistency(unittest.TestCase):
         self.assertIn("siseli_bridge/CHANGELOG.md", text)
         self.assertNotRegex(text, r"^## \[[0-9]", "the root file must not carry its own history")
 
+    def test_run_sh_carries_no_version_literal(self):
+        """run.sh printed a hardcoded banner that froze at 2.6.5 while the add-on
+        shipped 2.6.7, so every log contradicted itself in its own header and a bug
+        report quoted a release the user was not running. Forbidden outright rather
+        than kept in sync: bumping it just moves the drift to the next release."""
+        run_sh = (ADDON / "run.sh").read_text(encoding="utf-8")
+        self.assertNotRegex(
+            run_sh,
+            r"Siseli Inverter Bridge\s+[0-9]",
+            "run.sh must not print a version; core.log_startup_configuration() does",
+        )
+
     def test_core_reports_the_single_source(self):
         from src.siseli_bridge import version as version_mod
 

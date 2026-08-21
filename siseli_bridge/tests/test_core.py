@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from src.siseli_bridge import core
+from src.siseli_bridge import mqtt as mqtt_mod
 from src.siseli_bridge import parsers as parser_module
 from src.siseli_bridge import state as shared_state
 from tests.captures import CAPTURE_TELEMETRY
@@ -345,8 +346,7 @@ class TestAvailabilityWatchdog(_CoreTestCase):
 
     def setUp(self):
         super().setUp()
-        core._AVAILABILITY_ONLINE = True
-        self.addCleanup(lambda: setattr(core, "_AVAILABILITY_ONLINE", True))
+        shared_state.AVAILABILITY_ONLINE = True
 
     def test_fresh_telemetry_keeps_sensors_available(self):
         shared_state.LAST_TELEMETRY_TS = 1000.0
@@ -382,6 +382,92 @@ class TestAvailabilityWatchdog(_CoreTestCase):
             shared_state.LAST_TELEMETRY_TS = stale + 2
             self.assertIs(core.availability_watchdog_tick(now=stale + 2), True)
             pub.assert_called_once_with(True)
+
+
+class TestAvailabilitySurvivesAReconnect(unittest.TestCase):
+    """A reconnect must re-assert the watchdog's verdict, never a literal.
+
+    publish_discovery has to restore availability on connect -- the retained LWT fires
+    on an unclean drop, so nothing else would. It published a literal True, so any
+    broker restart during a quiet period flipped all ~200 entities back to available,
+    showing their last decoded values as live. The watchdog is edge-triggered, so it
+    saw no transition and could never take it back; the 600 s heartbeat then kept
+    refreshing expire_after, so that backstop never fired either.
+
+    This drives both threads' real entry points in order.
+    """
+
+    def setUp(self):
+        self.client = FakeMqttClient()
+        for target in ("src.siseli_bridge.mqtt.client", "src.siseli_bridge.core.client"):
+            patcher = mock.patch(target, self.client)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        ctx = isolated_state()
+        ctx.__enter__()
+        self.addCleanup(lambda: ctx.__exit__(None, None, None))
+
+        shared_state.LAST_STATE.clear()
+        shared_state.AVAILABILITY_ONLINE = True
+        shared_state.RUNNING = True
+        self.addCleanup(lambda: setattr(shared_state, "RUNNING", True))
+        # Skips the sweep, which would otherwise write the marker file under /data.
+        shared_state.DISCOVERY_CLEANED = True
+        self.addCleanup(lambda: setattr(shared_state, "DISCOVERY_CLEANED", False))
+
+        core.ADAPTIVE_TIMEOUT_LOGGED = False
+        self.addCleanup(lambda: setattr(core, "ADAPTIVE_TIMEOUT_LOGGED", False))
+
+        for target in ("src.siseli_bridge.core.log", "src.siseli_bridge.mqtt.log"):
+            patcher = mock.patch(target)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _availability(self):
+        return self.client.retained.get(mqtt_mod.AVAILABILITY_TOPIC)
+
+    def test_a_reconnect_does_not_resurrect_a_stale_bridge(self):
+        shared_state.LAST_TELEMETRY_TS = 1000.0
+        stale = 1000.0 + 4000  # well past the 1800 s default
+
+        self.assertIs(core.availability_watchdog_tick(now=stale), False)
+        self.assertEqual(self._availability(), "offline")
+
+        mqtt_mod.on_connect(self.client, None, {}, 0)
+        self.assertEqual(
+            self._availability(),
+            "offline",
+            "a reconnect must re-assert the watchdog's verdict, not a literal online",
+        )
+
+        self.assertIsNone(
+            core.availability_watchdog_tick(now=stale + 10),
+            "the watchdog and the broker must still agree after the reconnect",
+        )
+
+        shared_state.record_telemetry(stale + 20)
+        self.assertIs(core.availability_watchdog_tick(now=stale + 21), True)
+        self.assertEqual(self._availability(), "online")
+
+    def test_a_reconnect_while_fresh_still_marks_online(self):
+        """The re-assert is load-bearing -- it must not be lost."""
+        shared_state.LAST_TELEMETRY_TS = 1000.0
+        self.client.retained.pop(mqtt_mod.AVAILABILITY_TOPIC, None)
+
+        mqtt_mod.on_connect(self.client, None, {}, 0)
+        self.assertEqual(self._availability(), "online")
+
+    def test_shutdown_is_terminal_for_availability(self):
+        """shutdown clears RUNNING, then spends about a second restoring ARP before
+        publishing offline. An in-flight tick landing after that would republish
+        online onto a client about to disconnect cleanly, which suppresses the LWT."""
+        shared_state.LAST_TELEMETRY_TS = 1000.0
+        shared_state.AVAILABILITY_ONLINE = False
+        shared_state.RUNNING = False
+
+        self.assertIsNone(core.availability_watchdog_tick(now=1010.0))
+        self.assertIsNone(self._availability(), "nothing may be published after shutdown")
 
 
 class TestNonBrokerTraffic(_CoreTestCase):
@@ -495,8 +581,6 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
         ctx = isolated_state()
         ctx.__enter__()
         self.addCleanup(lambda: ctx.__exit__(None, None, None))
-        self._online = core._AVAILABILITY_ONLINE
-        self.addCleanup(lambda: setattr(core, "_AVAILABILITY_ONLINE", self._online))
 
     def _flaps_at(self, timeout, measure_cadence=True):
         """Replay the observed cadence and count availability transitions.
@@ -507,7 +591,7 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
         """
         transitions = []
         now = 1000.0
-        core._AVAILABILITY_ONLINE = True
+        shared_state.AVAILABILITY_ONLINE = True
         core.ADAPTIVE_TIMEOUT_LOGGED = False
         shared_state.TELEMETRY_INTERVALS.clear()
         shared_state.LAST_TELEMETRY_TS = 0.0
@@ -565,7 +649,7 @@ class TestAvailabilityAtRealCadence(unittest.TestCase):
     def test_a_genuine_stall_is_still_detected(self):
         from src.siseli_bridge import config as cfg
 
-        core._AVAILABILITY_ONLINE = True
+        shared_state.AVAILABILITY_ONLINE = True
         shared_state.LAST_TELEMETRY_TS = 1000.0
         with mock.patch.multiple(core, TELEMETRY_TIMEOUT_SEC=cfg.TELEMETRY_TIMEOUT_SEC), \
              mock.patch("src.siseli_bridge.core.publish_availability"), \
@@ -585,11 +669,9 @@ class TestAdaptiveTelemetryTimeout(_CoreTestCase):
 
     def setUp(self):
         super().setUp()
-        core._AVAILABILITY_ONLINE = True
         core.ADAPTIVE_TIMEOUT_LOGGED = False
         shared_state.TELEMETRY_INTERVALS.clear()
         shared_state.LAST_TELEMETRY_TS = 0.0
-        self.addCleanup(lambda: setattr(core, "_AVAILABILITY_ONLINE", True))
 
     def test_no_history_reports_no_observed_interval(self):
         self.assertEqual(core.observed_telemetry_interval(), 0.0)

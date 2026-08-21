@@ -145,7 +145,10 @@ def publish_discovery() -> None:
     for key in sorted(SENSORS.keys()):
         publish_sensor_discovery(key)
 
-    publish_availability(True)
+    # The watchdog's current verdict, never a literal. on_connect calls this on every
+    # reconnect, so publishing True here re-marked a stale bridge as available and the
+    # edge-triggered watchdog could never take it back.
+    publish_availability(_state.AVAILABILITY_ONLINE)
     _state.DISCOVERY_PUBLISHED = True
     log("[HA MQTT] Discovery published", level="info")
 

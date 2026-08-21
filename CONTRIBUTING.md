@@ -96,11 +96,17 @@ assertions — a synthetic block proves nothing about what a device actually emi
 
 ## Releasing
 
-The version lives in two places, because Supervisor reads `config.yaml` directly and
-cannot import Python:
+The version has one source of truth and two copies of it, because Supervisor reads
+`config.yaml` directly and cannot import Python:
 
 - `siseli_bridge/src/siseli_bridge/version.py` — the source of truth
 - `siseli_bridge/config.yaml` — what Supervisor reads
+- the README badge and the changelog heading
+
+Nothing else may carry a version literal. `run.sh` used to print one and it froze two
+releases behind, so every add-on log contradicted the banner `core.py` prints seconds
+later — and a maintainer triaging a pasted log diagnosed the wrong release.
+`test_packaging.py` now forbids it there outright.
 
 `tests/test_packaging.py` fails until those two, the README badge, and the heading at
 the top of the add-on changelog all agree. The failure mode it exists to prevent is
