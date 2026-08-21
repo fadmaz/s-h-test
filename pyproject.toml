@@ -1,11 +1,19 @@
 [build-system]
-requires = ["setuptools>=61"]
+# 77 rather than 61 because the [project] table below uses PEP 639 licence metadata
+# (a bare SPDX string plus `license-files`). On setuptools 61-76 that fails schema
+# validation inside the PEP 517 hook, so `pip install` dies before anything runs.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "siseli-bridge"
 dynamic = ["version"]
 requires-python = ">=3.9"
+license = "MIT"
+# Named explicitly, and NOTICE is named with it: setting this key at all narrows
+# setuptools' default glob, so ["LICENSE"] alone would silently drop the file that
+# records the upstream project's unlicensed status.
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "paho-mqtt>=1.6,<2.0",
     "scapy>=2.5,<2.7",

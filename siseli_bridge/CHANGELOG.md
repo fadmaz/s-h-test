@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `LICENSE` (MIT) and `NOTICE`. GitHub reported this project as unlicensed while the
+  README claimed MIT. The upstream project it was forked from carries no licence of
+  its own, so `NOTICE` states what the MIT grant does and does not cover, and lists
+  the licences of the bundled dependencies.
+- PEP 639 licence metadata in `pyproject.toml`, with a test pinning the
+  `setuptools>=77` build floor that the bare SPDX form requires.
+
 ## [2.6.12] - 2026-08-21
 
 ### Added

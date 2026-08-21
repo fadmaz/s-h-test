@@ -1,0 +1,30 @@
+# NOTICE
+
+This repository is a fork of [`yuraantonov11/siseli-ha`](https://github.com/yuraantonov11/siseli-ha).
+
+**The upstream repository carries no licence file.** Under default copyright, that
+means its author reserves all rights, and no licence to use, modify or redistribute
+the original work has been granted to anyone.
+
+The `LICENSE` file in this repository therefore covers **contributions made here** —
+which, as of 2.6.x, is the substance of the add-on: the parser, the sensor registry,
+the MQTT discovery layer, the state and configuration modules, the test suite, the
+build and CI tooling, and the documentation. It is not, and cannot be, a grant over
+the upstream author's original work.
+
+If you intend to redistribute this project or build on it commercially, and that
+distinction matters to you, seek permission from the upstream author.
+
+## Third-party dependencies
+
+Bundled at runtime, under their own licences:
+
+| Component | Licence |
+|---|---|
+| [scapy](https://github.com/secdev/scapy) | GPL-2.0 |
+| [paho-mqtt](https://github.com/eclipse-paho/paho.mqtt.python) | EPL-2.0 / EDL-1.0 |
+| [Home Assistant add-on base image](https://github.com/hassio-addons/addon-base) | MIT |
+
+`scapy` is imported by the bridge and installed into the add-on image; it is not
+vendored into this repository, and its GPL-2.0 terms apply to it rather than to this
+project's own sources.

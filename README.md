@@ -404,4 +404,8 @@ defect was found by running it on someone's hardware, not by reading the code.
 
 ## License
 
-MIT. Free to use and modify.
+[MIT](LICENSE), covering the contributions made in this repository.
+
+The [upstream project](https://github.com/yuraantonov11/siseli-ha) this was forked from
+carries no licence of its own, so that grant cannot extend to it. [`NOTICE`](NOTICE) sets
+out the distinction, and lists the licences of the bundled dependencies.
