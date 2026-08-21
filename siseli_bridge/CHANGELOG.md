@@ -22,6 +22,17 @@ All notable changes to this project will be documented in this file.
   bounced out to GitHub. The reference documentation now lives there: requirements,
   installation, every configuration option, network setup and troubleshooting.
 - A CI status badge and a licence badge on the README.
+- **`SECURITY.md`**. The add-on ARP-spoofs a device on the user's LAN, holds `NET_RAW`,
+  `NET_ADMIN` and `host_network`, and runs with AppArmor disabled — none of which was
+  explained anywhere. It now is, including `apparmor: false` as a stated gap rather than
+  an omission, and the two real risks: ARP spoofing looks exactly like an attack to a
+  switch with dynamic ARP inspection, and a hard power loss skips `restore_arp()`.
+- `CODE_OF_CONDUCT.md`, `.github/PULL_REQUEST_TEMPLATE.md` and
+  `.github/ISSUE_TEMPLATE/config.yml`.
+- Issue templates now collect the Home Assistant version, installation type and
+  architecture, and offer the brand list as a dropdown. The add-on log is required on a
+  bug report, and **the log-scrubbing warning is now an enforced checkbox** — it appeared
+  three times in prose and was enforced nowhere.
 
 ### Changed
 
