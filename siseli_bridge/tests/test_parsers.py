@@ -65,13 +65,17 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(state["firmware_version"], "0010.11")
         self.assertEqual(state["software_version"], "10.11")
 
-    def test_ascii_schema_rounds_output_set_frequency_to_app_style(self):
+    def test_ascii_schema_reads_the_rated_power_from_2l0e(self):
+        """Token 6 is the rated apparent power, constant across every capture on both
+        devices, and the denominator of load_pct. The owner confirms 11 kW."""
         state = SolarParser._try_ascii_schema({
             "2l0E": b"(229.8 49.9 252 129 2 24 11000 006.1 0044)"
         })
 
         self.assertEqual(state["out_hz"], 49.9)
-        self.assertEqual(state["output_set_frequency"], 50)
+        self.assertEqual(state["rated_apparent_va"], 11000)
+        # The raw token keeps its key so no entity is orphaned.
+        self.assertEqual(state["output_status_bits"], "11000")
 
     def test_ascii_schema_93vq_does_not_fabricate_preset_values(self):
         """The 93VQ block used to trigger 25 hardcoded values whenever the packed
@@ -135,12 +139,15 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(state["bms_discharge_current_a"], 0.0)
         self.assertEqual(state["bms_avg_temp_c"], 18.95)
 
-    def test_ascii_schema_yavb_without_tail_keeps_bms_average_temperature_absent(self):
+    def test_ascii_schema_derives_bms_average_temperature_from_yavb_token_8(self):
+        """The same real block carries the value twice -- token 8 as tenths of a Kelvin
+        and token 10 as plain Celsius -- so the block supplies its own conversion key.
+        This is that block with the Celsius tail stripped, which is what most firmwares
+        send: 2921/10 - 273.15 = 18.95, identical to the tail it no longer has."""
         state = SolarParser._try_ascii_schema({
             "Yavb": b"(04 1001100000000000 042.0 057.6 195.0 054 0022.3 0000.0 02921 000000)"
         })
-
-        self.assertNotIn("bms_avg_temp_c", state)
+        self.assertEqual(state["bms_avg_temp_c"], 18.95)
 
     def test_energy_dashboard_calculations_use_bms_currents_and_scale(self):
         shared_state.LAST_STATE.clear()

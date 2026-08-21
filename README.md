@@ -1,6 +1,6 @@
 # ☀️ Siseli Inverter Bridge for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-2.6.9-blue.svg)](siseli_bridge/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.6.10-blue.svg)](siseli_bridge/CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
 A Home Assistant add-on that reads your Siseli-compatible solar inverter **locally**, by
@@ -101,7 +101,7 @@ Enable **Watchdog** and **Start on boot**, then start the add-on. Within a coupl
 minutes the log should show:
 
 ```
---- Siseli Inverter Bridge 2.6.9 ---
+--- Siseli Inverter Bridge 2.6.10 ---
 [ARP] Interception ACTIVE: 192.168.x.x <-> 192.168.x.x
 [HA MQTT] Connected to ...
 [HA MQTT] Discovery published

@@ -1194,7 +1194,10 @@ class SolarParser:
                 state["out_v"] = round(out_v, 1)
             if out_hz is not None:
                 state["out_hz"] = round(out_hz, 1)
-                state["output_set_frequency"] = int(round(out_hz))
+                # output_set_frequency was this same token rounded. The portal carries
+                # Output Frequency 49.9 Hz and Output Set Frequency 50 Hz as two fields
+                # at one instant, so they are different quantities -- and a sagging
+                # output at 49.4 Hz would have published the user's setting as 49.
 
         if len(vals) >= 4:
             out_va = SolarParser._to_int(vals[2])
@@ -1216,7 +1219,15 @@ class SolarParser:
                 state["output_dc_comp"] = dc_comp
 
         if len(vals) >= 7:
+            # Named as bits historically; it is a number. Constant 11000 across every
+            # capture on both devices, and it is the denominator of load_pct --
+            # 550/11000 = 5%, 4056/11000 = 36.87% -> 36, matching the reported value
+            # every time. The owner confirms 11 kW is the inverter's maximum output.
+            # The raw string keeps its key so no entity is orphaned.
             state["output_status_bits"] = vals[6]
+            rated_va = SolarParser._to_int_strict(vals[6])
+            if rated_va is not None and 0 < rated_va <= 200000:
+                state["rated_apparent_va"] = rated_va
 
         if len(vals) >= 8:
             inductor_current = SolarParser._to_float(vals[7])
@@ -1287,10 +1298,11 @@ class SolarParser:
             state["mains_flow_code"] = vals[7]
 
         if len(vals) >= 9:
+            # This token is a number, not a bit field: it reads 11000, 08969 and 07969
+            # across captures. main_output_relay_status took its leading character, so
+            # the 07969 payload reported the relay Off while the same payload reported
+            # 4055 W delivered to the load. Nothing here identifies the relay.
             state["wdrr_status_bits"] = vals[8]
-            state["main_output_relay_status"] = SolarParser._decode_yes_no_digit(
-                vals[8][:1], yes_word="On", no_word="Off"
-            )
 
         if len(vals) >= 10:
             state["mains_input_range_code"] = vals[9]
@@ -1392,10 +1404,11 @@ class SolarParser:
                 state["pv2_power_w"] = pv2_power
             if pv2_voltage_primary is not None:
                 state["pv2_v"] = round(pv2_voltage_primary, 1)
-        if len(vals) >= 4:
-            pv_channel_count = SolarParser._to_int(vals[3])
-            if pv_channel_count is not None:
-                state["total_number_of_grid_connection"] = pv_channel_count
+        # noeP token 3 reads 2 in every capture, sits between PV2 power and a second
+        # PV2 voltage, and the local name for it here was pv_channel_count. This device
+        # also has 2 parallel inverters and uxJp token 2 is also 2, so three unrelated
+        # quantities all equal 2 -- which is why it was read as a grid-connection count.
+        # A single-inverter capture reading 1 would settle it.
 
         # Temperatures -> V4W3
         vals = parsed.get("V4W3", ("", []))[1]
@@ -1422,12 +1435,10 @@ class SolarParser:
             fan_1_speed = SolarParser._to_int(vals[5])
             if fan_1_speed is not None:
                 state["fan_1_speed"] = fan_1_speed
-                state["fan_1_status"] = "Open" if fan_1_speed > 0 else "Close"
         if len(vals) >= 7:
             fan_2_speed = SolarParser._to_int(vals[6])
             if fan_2_speed is not None:
                 state["fan_2_speed"] = fan_2_speed
-                state["fan_2_status"] = "Open" if fan_2_speed > 0 else "Close"
         if len(vals) >= 9:
             pv2_temp = SolarParser._to_float(vals[8])
             if pv2_temp is not None:
@@ -1448,7 +1459,10 @@ class SolarParser:
         if have_pv_total:
             state["generation_power_w"] = pv_total_w
             state["c_generation_power_w"] = SolarParser._scale_main_power(pv_total_w)
-            state["solar_charging_switch"] = "Open" if pv_total_w > 0 else "Close"
+            # solar_charging_switch was "Open" if pv_total_w > 0, which reports the
+            # switch as Close every night. The portal lists it beside AC Charging
+            # Switch and Charging Main Switch as a configuration setting, and the one
+            # switch that is genuinely decoded comes from a 93VQ config field.
 
         # Settings candidates -> dHrK
         vals = parsed.get("dHrK", ("", []))[1]
@@ -1633,7 +1647,22 @@ class SolarParser:
             state["yavb_code_raw"] = vals[8]
         if len(vals) >= 10:
             state["yavb_aux_raw"] = vals[9]
+        if len(vals) >= 9 and "bms_avg_temp_c" not in state:
+            # Token 8 is the BMS average temperature in tenths of a Kelvin. One real
+            # block from a second device carries both forms -- token 8 = 02921 and
+            # token 10 = 18.95 -- and 2921/10 - 273.15 = 18.95 exactly, so the block
+            # supplies its own conversion key. On this device token 8 = 03041 gives
+            # 30.95, digit for digit what the vendor portal reports. Every observed
+            # value ends in .95 because an integer deci-Kelvin minus 273.15 must.
+            raw_dk = SolarParser._to_int_strict(vals[8])
+            if raw_dk is not None:
+                celsius = raw_dk / 10.0 - 273.15
+                if -50.0 <= celsius <= 150.0:
+                    state["bms_avg_temp_c"] = round(celsius, 2)
+
         if len(vals) >= 11:
+            # Firmwares that append a plain-Celsius tail. Preferred when present: it is
+            # the vendor's own conversion, and it is what proves the token 8 formula.
             bms_avg_temp = SolarParser._to_float(vals[10])
             if bms_avg_temp is not None and -50.0 <= bms_avg_temp <= 150.0:
                 state["bms_avg_temp_c"] = round(bms_avg_temp, 2)

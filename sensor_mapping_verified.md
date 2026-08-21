@@ -39,14 +39,14 @@ this capture carried eleven blocks, the next carried four, with **zero overlap**
 | Block | Tokens | Carries | Fully decoded? |
 |---|---|---|---|
 | `2ONL` | 8 | Battery voltage, capacity, currents, series count, bus voltage | Tokens 6–7 undecoded |
-| `2l0E` | 9 | Output voltage/frequency, apparent and active power, load %, DC component, inductor current, rated power | Token 6 undecoded |
+| `2l0E` | 9 | Output voltage/frequency, apparent and active power, load %, DC component, **rated apparent power** (token 6), inductor current | Token 8 unread |
 | `93VQ` | 20 | The settings block — charge voltages, SOC thresholds, currents, times | Token 3 undecoded |
 | `COST` | 7 | System date/time, daily/monthly/yearly/total PV energy | Token 6 undecoded |
-| `Mpod` | 9 | PV1 voltage/current/power, PV1 temperature | Tokens 4–5, 8 undecoded |
-| `V4W3` | 11 | Temperatures and fan speeds | Token 10 undecoded |
+| `Mpod` | 9 | PV1 voltage/current/power. **No temperature** — `pv_temp` comes from `V4W3`[0] | Tokens 3–8 unread |
+| `V4W3` | 11 | Temperatures and fan speeds | Tokens 7, 10 unread |
 | `WdRR` | 10 | Grid voltage/frequency, mains loss thresholds, mains power, flow, relay | Token 8 partly |
-| `Yavb` | 10 | BMS limits, SOC, charge/discharge currents, **the 16-bit flag word** | Tokens 1, 8, 9 undecoded |
-| `dHrK` | 17 | Second-output and equalization settings | Tokens 11, 12, 14 undecoded |
+| `Yavb` | 10 | BMS limits, SOC, charge/discharge currents, **BMS average temperature** (token 8), **the 16-bit flag word** | Tokens 1, 9 undecoded |
+| `dHrK` | 17 | Second-output and equalization settings | Tokens 11, 12, 14 unread; token 16 only partly consumed |
 | `eo8w` | 3 | Status code, **13-char flag string**, build blob | Tokens 1–2 undecoded |
 | `noeP` | 6 | PV2 voltage/current/power | Token 5 undecoded |
 | `hR6Y` | 3 | Firmware version, build date, build slot | Fully decoded |
@@ -146,10 +146,10 @@ Every row here was checked against the portal's own label and value.
 | High Frequency Of Mains Power Loss | `65 Hz` | `high_frequency_of_mains_power_loss_hz` | `65.0` | `WdRR`[4] |
 | Low Frequency Of Mains Power Loss | `40 Hz` | `low_frequency_of_mains_power_loss_hz` | `40.0` | `WdRR`[5] |
 | Mains Input Range | `UPS` | `mains_input_range` | `UPS` | `WdRR`[9] |
-| Main Output Relay Status | `On` | `main_output_relay_status` | `On` | `WdRR`[8] bit 1 |
+| Main Output Relay Status | `On` | *not decoded* | — | **was** `WdRR`[8] leading character — see §6 |
 | Grid Connection Sign | `Off Grid` | `grid_connection_sign` | `Off Grid` | `93VQ` |
 | Grid Connected Current | `20 A` | `grid_connected_current_a` | `20` | `93VQ`[17] |
-| Total Number Of Grid Connection | `2` | `total_number_of_grid_connection` | `2` | — |
+| Total Number Of Grid Connection | `2` | *not decoded* | — | **was** `noeP`[3], which is 2 for three unrelated reasons |
 
 ### Load
 
@@ -198,7 +198,7 @@ Every row here was checked against the portal's own label and value.
 | Max. Temperature | `60` *(no unit shown)* | `max_temperature_c` | `59.0` | `V4W3`[4] |
 | Fan 1 Speed | `30 %` | `fan_1_speed` | `30` | `V4W3`[5] **exact** |
 | Fan 2 Speed | `30 %` | `fan_2_speed` | `30` | `V4W3`[6] **exact** |
-| Fan 1 Status / Fan 2 Status | `Open` | `fan_1_status` / `fan_2_status` | `Open` | `V4W3`[7] |
+| Fan 1 Status / Fan 2 Status | `Open` | *not decoded* | — | **was** inferred from fan speed, never read from `V4W3`[7] |
 
 ### Settings — all exact matches
 
@@ -212,7 +212,7 @@ Every one of these agreed exactly. `93VQ` unless noted.
 | Maximum Total Charging Current | `50 A` | `maximum_total_charging_current_a` |
 | Max utility charge current | `10 A` | `max_utility_charge_current_a` |
 | Output Set Voltage | `230 V` | `output_set_voltage` |
-| Output Set Frequency | `50 Hz` | `output_set_frequency` |
+| Output Set Frequency | `50 Hz` | *not decoded — was `out_hz` rounded, see §6* |
 | Charging Priority Order | `SNU` | `charging_priority_order` |
 | Working Mode | `SBU` | `working_mode` |
 | Parallel Mode | `Enable` | `parallel_mode` |
@@ -342,25 +342,51 @@ would be far more informative than another healthy one.**
 | Battery Type | `LIA` | `battery_type` | Was a hardcoded string until 2.6.1 |
 | PV Energy Feeding Priority | `LBU` | `pv_energy_feeding_priority` | |
 | PV Grid Connection Agreement | `3` | `pv_grid_connection_agreement` | |
-| BMS Average Temperature | `30.95 °C` | `bms_avg_temp_c` | The bridge logs this in `[UNRESOLVED TARGETS]` every payload |
+| ~~BMS Average Temperature~~ | `30.95 °C` | `bms_avg_temp_c` | **SOLVED** — `Yavb`[8] in tenths of a Kelvin, see below |
 
 `Mode`, `Output Model` and `Battery Type` are alphabetic codes like the ones `93VQ`
 already yields (`SNU`, `SBU`, `Host`), so `93VQ` is the natural place to look.
 
-`BMS Average Temperature` is a **decimal** value, `30.95` — two decimal places, unlike
-every other temperature on the device. That precision is distinctive and should make it
-findable.
+**`BMS Average Temperature` is solved.** The `.95` tail that looked distinctive *is*
+the answer: `Yavb`[8] holds the value in tenths of a Kelvin, and an integer deci-Kelvin
+minus 273.15 must always end in `.95`.
+
+```
+your device   03041 / 10 - 273.15 = 30.95 C   portal: 30.95 C
+your device   03091 / 10 - 273.15 = 35.95 C   (afternoon, discharging)
+device B      02921 / 10 - 273.15 = 18.95 C
+```
+
+The proof is inside a single block: one real capture from a second device carries the
+value **twice** — token 8 as `02921` and a token 10 tail reading `18.95`. The vendor
+supplies its own conversion key. Decoded since 2.6.10.
 
 ### Not on the portal either
 
 | Bridge key | Note |
 |---|---|
 | `util_chg` | Named a "candidate" in the registry; no portal field corresponds |
-| `c_bms_remaining_capacity_ah` | A calculated helper that is never populated |
+| `c_bms_total_capacity_ah` | Not a wire value at all — it is `BATTERY_COUNT × BATTERY_CAPACITY_PER_BATTERY_AH`, a configuration echo. It reads 600 Ah here while the BMS's own `bms_nominal_ah` reads 299.8 Ah from the wire |
 
 ---
 
 ## 6. Discrepancies worth investigating
+
+### Four quantities were published under another quantity's name — all removed in 2.6.10
+
+These were not missing decodes. They were wrong ones, which is worse: a wrong value looks
+like a working sensor.
+
+| Sensor | What it actually was | How it showed |
+|---|---|---|
+| `main_output_relay_status` | The leading character of `WdRR`[8], a **number** reading `11000`, `08969`, `07969` across captures | Reported the relay **Off** in a payload that also reported **4055 W delivered to the load** |
+| `output_set_frequency` | `out_hz` rounded — the *measured* frequency, published a second time | The portal carries Output Frequency `49.9 Hz` and Output Set Frequency `50 Hz` as two fields at one instant. A sagging output at 49.4 Hz would publish the user's *setting* as 49 |
+| `solar_charging_switch` | `"Open" if pv_power > 0` | Reports the switch **closed every night** |
+| `fan_1_status` / `fan_2_status` | `"Open" if fan_speed > 0` | The portal carries Fan Speed, Fan Status and Abnormal Fan Speed as three separate fields |
+| `total_number_of_grid_connection` | `noeP`[3], whose local variable in the code was named `pv_channel_count` | Reads `2` — as do the inverter count and `uxJp`[2]. Three unrelated quantities all equal two on this install |
+
+All five keys stay registered and disabled, so no retained discovery config is orphaned.
+
 
 **⚠ `output_dc_comp` — portal `3`, bridge `32`.** Earlier in the same capture the bridge
 read `8`. The portal's value is a single digit while the bridge's is two. Possibly a
