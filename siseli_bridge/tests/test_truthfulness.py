@@ -58,6 +58,25 @@ class TestNoFabricatedValues(_ParserTestCase):
         state = SolarParser._try_ascii_schema({"Yavb": captures.BLOCK_YAVB_CHARGING})
         self.assertNotIn("battery_type", state)
 
+    def test_battery_type_is_not_guessed_from_a_non_numeric_token(self):
+        """After the preset was removed the key kept a narrower guess: publish 2ONL
+        token 6 as the pack chemistry if it happens not to be a number. On the one
+        device with byte-faithful captures that token is 110007200000, a twelve-digit
+        status field, so the guard never fired and nothing supported the reading it
+        would have produced. The official app does report LIA for this device, so the
+        old constant was right here -- and would have claimed LIA for every inverter."""
+        state = SolarParser._try_ascii_schema({"2ONL": captures.BLOCK_2ONL_CHARGING})
+        self.assertNotIn("battery_type", state)
+        # The neighbouring token keeps its real meaning.
+        self.assertEqual(state["bus_voltage"], 420.0)
+
+    def test_battery_status_is_not_guessed_from_the_bus_voltage_token(self):
+        """2ONL token 5 had the same shape -- publish it as the battery status if it
+        is not numeric -- for a token that is the bus voltage."""
+        state = SolarParser._try_ascii_schema({"2ONL": captures.BLOCK_2ONL_CHARGING})
+        self.assertEqual(state["battery_status"], "Charge")  # from the calculated power
+        self.assertEqual(state["bus_voltage"], 420.0)
+
     def test_battery_status_needs_battery_data(self):
         """A payload carrying only the grid block reported "Charge"."""
         state = SolarParser._try_ascii_schema({"WdRR": captures.BLOCK_WDRR_NO_GRID_FLOW})

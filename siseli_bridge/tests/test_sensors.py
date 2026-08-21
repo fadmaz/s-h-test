@@ -1,3 +1,5 @@
+import pathlib
+import re
 import unittest
 
 # Add parent directory to path to allow importing src
@@ -141,6 +143,29 @@ class TestUndecodableSensors(unittest.TestCase):
         for key in ("bat_v", "grid_v", "load_w", "bms_current_soc", "yavb_flags_raw"):
             with self.subTest(key=key):
                 self.assertNotIn(key, UNDECODED_SENSOR_KEYS)
+
+    def test_no_listed_key_is_written_by_the_parser(self):
+        """The list means "nothing decodes this", and load_cached_state purges every
+        key on it at startup. A key with a live writer would be purged on restart and
+        rewritten on the next payload, which is neither state.
+
+        Checked against the source rather than a hardcoded sample, because the sample
+        is what let battery_type sit on the wrong side of this for several releases.
+        Every state write in parsers.py uses a double-quoted literal key (152 of them,
+        none single-quoted), so this pattern sees all of them.
+        """
+        parsers_src = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "src" / "siseli_bridge" / "parsers.py"
+        ).read_text(encoding="utf-8")
+
+        written = set(re.findall(r'state\["([a-z0-9_]+)"\]\s*=', parsers_src))
+        self.assertGreater(len(written), 100, "the pattern stopped matching state writes")
+
+        overlap = sorted(written & set(UNDECODED_SENSOR_KEYS))
+        self.assertEqual(
+            overlap, [], f"written by the parser yet listed as undecoded: {overlap}"
+        )
 
     def test_configured_capacity_is_named_as_a_configuration_echo(self):
         """It is BATTERY_COUNT x BATTERY_CAPACITY_PER_BATTERY_AH, not a BMS reading,

@@ -1354,20 +1354,18 @@ class SolarParser:
             if dischg_a is not None and 0 <= dischg_a <= 300:
                 state["dischg_current"] = round(dischg_a, 2)
 
-        if len(vals) >= 6:
-            maybe_status = vals[5]
-            if maybe_status and not STRICT_NUM_RE.match(maybe_status):
-                state["battery_status"] = maybe_status
-
+        # Tokens 5 and 6 previously carried a pair of guesses: "if this position is not
+        # a number, publish it as the battery status / the pack chemistry". Neither
+        # position means that on the one device with byte-faithful captures -- token 5
+        # is the bus voltage (369) and token 6 a twelve-digit status field
+        # (110007200000) -- so the guard never fired and nothing supported the reading
+        # it would have produced. battery_status is derived from the calculated power
+        # instead, which is what makes it agree with the power sensors; battery_type
+        # has no decode path at all and is listed in UNDECODED_SENSOR_KEYS.
         if len(vals) >= 6:
             bus_v = SolarParser._to_float(vals[5])
             if bus_v is not None:
                 state["bus_voltage"] = round(bus_v, 1)
-
-        if len(vals) >= 7:
-            maybe_type = vals[6]
-            if maybe_type and not STRICT_NUM_RE.match(maybe_type):
-                state["battery_type"] = maybe_type
 
         # PV1 -> Mpod
         vals = parsed.get("Mpod", ("", []))[1]
@@ -1692,9 +1690,11 @@ class SolarParser:
             state["bulk_v"] = state["strong_charging_voltage_v"]
         if state.get("mains_current_flow_direction") is not None:
             state["mains_flow_state"] = state["mains_current_flow_direction"]
-        # battery_type is decoded from the 2ONL block only (see above). It was
-        # previously defaulted to "LIA" whenever a Yavb block was present, which
-        # guessed the pack chemistry from the mere existence of a block.
+        # battery_type has no writer. It was defaulted to "LIA" whenever a Yavb block
+        # existed, then narrowed to a guess at 2ONL token 6 that never fires on real
+        # hardware. The official app does show LIA for the reference device, so the
+        # constant happened to be right there -- and would have said LIA for every
+        # other inverter too. Nothing on the wire carries it.
 
         # c_bms_total_capacity_ah is written inside the battery branch of the energy
         # calculation, so that a payload carrying no battery data at all produces an
