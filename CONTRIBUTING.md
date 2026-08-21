@@ -1,9 +1,10 @@
 # Contributing
 
-`CLAUDE.md` is the companion to this file: it covers the architecture, the decoding
-model, and the traps that have caused real broken releases. This file covers setup,
-conventions and process. Keep both current — a stale entry in either is worse than
-none, because it is trusted.
+This file covers development setup, test conventions, how to contribute a capture from
+your own inverter, and the release checklist. `README.md` covers installation and
+configuration for users.
+
+Keep this file current — a stale entry here is worse than none, because it is trusted.
 
 ## Development setup
 

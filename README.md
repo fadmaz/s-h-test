@@ -1,267 +1,388 @@
-# ☀️ Siseli Solar Cloud Home Assistant Bridge
+# ☀️ Siseli Inverter Bridge for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-2.6.8-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.6.8-blue.svg)](siseli_bridge/CHANGELOG.md)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 
-> **Acknowledgment:** This project is an expanded and generalized fork of the excellent work originally created at [yuraantonov11/siseli-ha](https://github.com/yuraantonov11/siseli-ha). Huge thanks to the original author!
+A Home Assistant add-on that reads your Siseli-compatible solar inverter **locally**, by
+decoding the telemetry it already sends to the vendor cloud — and publishes it to Home
+Assistant through MQTT auto-discovery.
 
-Unleash your Siseli-compatible inverter into Home Assistant — **100% locally and instantly** — without relying on external clouds for HA data. The bridge intercepts MQTT traffic to the Siseli Cloud, decodes it locally, and creates sensors via MQTT Auto-Discovery.
+Your inverter keeps talking to the cloud, so the official mobile app carries on working.
+The bridge only listens in.
 
-> **🔒 Privacy Note:** Your Home Assistant instance intercepts the data for local use, but it simultaneously transparently forwards the traffic to the Siseli Cloud. This ensures your official mobile app continues to work flawlessly.
-
----
-
-## ✨ What is New (2.6.0)
-
-**This release removes sensors that were never read from your inverter.**
-
-Three blocks of the parser filled in around 37 sensors with hardcoded values whenever
-a raw field matched one specific inverter's configuration. That included twelve BMS
-alarm flags and eight fault indicators — `overloaded`, `machine_over_temperature`,
-`low_battery_alarm` and others — which were literal `"No"` strings in the source code.
-They could not report a fault under any circumstances. `mode` on the Main card was
-likewise the fixed string `"Battery Mode"`.
-
-Those sensors now report **Unknown**. That is not a regression: the previous value was
-not a reading. They stay in place, disabled by default on new installations, so that a
-future real decode brings them back with the same entity.
-
-Also fixed:
-
-- **Overload is now visible.** Output load above 100 % was being discarded, so an
-  overloaded inverter kept showing its last normal reading.
-- **The output relay can report Off.** It could previously only ever read `On`.
-- **Energy counters can no longer be poisoned.** BMS currents are range-checked, and
-  the calculated energy sensors only run on payloads that actually carry battery data.
-  A payload with no battery readings at all used to keep integrating a cached current.
-- **Six sensors had two sources disagreeing.** One temperature decoded as 117.5 °C from
-  one block and 51.0 °C from another; a state-of-charge percentage was being written
-  into a sensor measured in amps.
-- **`UPDATE_INTERVAL_SEC` now actually throttles.** It previously published on every
-  change, so the option did nothing despite being documented as saving database storage.
-- **Cell voltages no longer shift.** A collapsed cell used to renumber every cell after
-  it, so `cell_3_mv` would show physical cell 4.
-
-### If your energy totals look too high
-
-The calculated energy sensors are `total_increasing`, so an inflated value can never
-correct itself downward. Turn on **Reset Calculated Energy Counters**, restart the
-add-on once, then turn it back off.
-
-### New options
-
-- **Sensor Expiry (`EXPIRE_AFTER_SEC`)** — how long a value stays valid before Home
-  Assistant marks it unavailable. Default 600 seconds.
-- **Reset Calculated Energy Counters (`RESET_ENERGY_COUNTERS`)** — see above.
-
-
-## 📘 Add-on Page Documentation
-
-The add-on **Info** page in Home Assistant can show a "Visit ... page" link. This repository now points that link directly to this README.
-
-If you do not see the updated link yet:
-
-1. Open **Settings -> Add-ons -> Siseli Inverter Bridge**.
-2. Click **Rebuild**.
-3. Refresh the add-on page.
+> **Acknowledgment:** an expanded and generalized fork of the original work at
+> [yuraantonov11/siseli-ha](https://github.com/yuraantonov11/siseli-ha). Huge thanks to
+> the original author.
 
 ---
 
-## 🌟 Supported Brands
+## Contents
 
-This add-on supports a wide range of inverter brands that utilize the Siseli IoT cloud platform, including but not limited to:
-
-- Solar of Things
-- LUMINOUS NEO
-- SUN WISE
-- Queen Tech
-- LIB Life
-- Sun house
-- LeiLing
-- SunSaviour
-- ECOmenic
-- HC solar
-- 沐能低碳
-- PowMr
-- Taico
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [What you get](#what-you-get)
+- [Parallel inverters and battery banks](#parallel-inverters-and-battery-banks)
+- [Network setup](#network-setup)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [Supported hardware](#supported-hardware)
+- [Contributing](#contributing)
 
 ---
 
-## 🚀 Quick Setup
+## How it works
 
-### Step 1: Prepare Home Assistant
+Your inverter's WiFi dongle publishes telemetry over MQTT to the Siseli cloud at
+`8.212.18.157:1883`. The add-on:
 
-Ensure the official **Mosquitto Broker** add-on is installed and configured:
+1. **Puts itself in the path** using ARP interception, so the inverter's packets reach
+   the Home Assistant host.
+2. **Reassembles the TCP stream** and pulls out the MQTT PUBLISH frames.
+3. **Decodes the payload** — base64 blocks keyed by four-character names (`2ONL`, `WdRR`,
+   `Yavb`, …), each a list of space-separated values read by position.
+4. **Publishes to your broker** with MQTT auto-discovery, so entities appear on their own.
+5. **Forwards the traffic onward** to the cloud, unchanged.
 
-1. Go to **Settings -> Add-ons -> Add-on Store**.
-2. Install **Mosquitto Broker**.
-3. Start it and ensure you have an MQTT user created.
+It never terminates a connection and never opens a listening socket. It observes, decodes,
+and relays.
 
-### Step 2: Add Repository
-
-1. Copy this repository URL: `https://github.com/fadmaz/siseli-ha`
-2. In Home Assistant, go to **Settings -> Add-ons -> Add-on Store**.
-3. Click the three dots in the top right -> **Repositories**.
-4. Paste the URL and click **Add**.
-
-### Step 3: Install & Configure
-
-1. Find **Siseli Inverter Bridge** in the store and click **Install**.
-2. Go to the **Configuration** tab.
-3. Fill in the required fields:
-   - **INVERTER_IP**: The local IP of your inverter (e.g., `192.168.1.139`).
-   - **ROUTER_IP**: The local IP of your router (e.g., `192.168.1.1`).
-   - **AUTO_INTERCEPT**: Keep `true` to use ARP Spoofing (automatic interception).
-
-- Optional parallel-system fields:
-  - **INVERTER_COUNT**: Number of parallel inverters.
-  - **BATTERY_COUNT**: Number of batteries in the bank.
-  - **BATTERY_CAPACITY_PER_BATTERY_AH**: Capacity per battery in Ah.
-
-4. Go to the **Info** tab, enable **Watchdog**, and click **Start**.
-
-### Parallel Inverter/Battery Scaling
-
-When using multiple inverters in parallel, main summary power sensors are scaled with:
-
-`c_scaled_power = raw_power * INVERTER_COUNT`
-
-This is applied to:
-
-- `c_generation_power_w`
-- `c_mains_power_w`
-- `c_load_w`
-
-For battery-bank visibility, the bridge also publishes calculated BMS capacity helper sensors on the Main device:
-
-- `c_bms_total_capacity_ah`
-
-All calculated sensors use the `c_` prefix so they are easy to distinguish from raw inverter values.
+**What this means in practice:** if the add-on stops, your inverter keeps working and the
+vendor app keeps working. You lose the Home Assistant sensors, nothing else.
 
 ---
 
-## 🛠 How it Works (Technical)
+## Requirements
 
-The add-on uses multiple methods for traffic interception. For the inverter to start sending data to this add-on, it needs to "think" it is sending it to the Siseli cloud:
-
-### Method A: ARP interception (recommended, default)
-
-With `AUTO_INTERCEPT` enabled, the add-on tricks the inverter into sending its data to Home Assistant instead of the router. The bridge parses the data and transparently forwards it to the Siseli cloud.
-
-> **⚠️ WARNING:** You are using ARP spoofing, which is a sensitive network technique. It can trigger security alerts on advanced network setups or enterprise routers (like UniFi or pfSense).
-
-### Method B: Router-side redirect (advanced, unsupported)
-
-Route traffic destined for the Siseli cloud IP through your Home Assistant host, and
-set `AUTO_INTERCEPT` to `false`.
-
-This works only if all three hold, which is why it is not supported:
-
-- the redirect must preserve `TARGET_HOST` (`8.212.18.157`) as the **destination IP**.
-  The bridge matches on that address, so anything that rewrites the destination — a DNS
-  override, a NAT redirect — is not seen at all;
-- the Home Assistant host must have `net.ipv4.ip_forward` enabled, or the inverter loses
-  its connection entirely;
-- your router must support policy routing of a single destination address.
-
-If you cannot use ARP interception, **switch port mirroring (SPAN) is the better
-answer**: mirror the inverter's port to the Home Assistant host and leave
-`AUTO_INTERCEPT` off. The sniffer is passive, so nothing else is required, and the
-inverter's traffic is never touched.
-
-> A DNS override pointing the Siseli domain at Home Assistant does **not** work. There
-> is no listener — the bridge observes traffic, it does not terminate it — so the
-> inverter's connection is simply refused.
+| | |
+|---|---|
+| **Architecture** | `aarch64` or `amd64`. 32-bit builds (`armv7`, `armhf`, `i386`) are not published — the add-on will not appear in the store on those systems. |
+| **Home Assistant** | Supervised or Home Assistant OS. The add-on needs `host_network`, `NET_ADMIN` and `NET_RAW` to capture and inject frames, and runs with AppArmor disabled. |
+| **MQTT broker** | Any broker Home Assistant already uses. The [Mosquitto add-on](https://github.com/home-assistant/addons/tree/master/mosquitto) is the usual choice. |
+| **Network** | The inverter and Home Assistant must be on the same layer-2 network for ARP interception to work. |
 
 ---
 
-## 📊 Available Sensors
+## Installation
 
-This bridge dynamically extracts and exposes **almost every single sensor and data point available in the official Siseli app** (100+ entities) directly into Home Assistant via MQTT Auto-Discovery.
+### 1. Set up MQTT
 
-Sensors are now split across multiple Home Assistant devices instead of one large combined device:
+Install the **Mosquitto broker** add-on if you have not already, and create a Home
+Assistant user for the bridge to log in with (**Settings → People → Users → Add user**).
+You will need that username and password in step 3.
 
-- **Battery**
-- **BMS**
-- **Grid**
-- **Load**
-- **PV**
-- **Diagnostics** (for non-functional or fallback settings)
+### 2. Add this repository
 
-The "More" tab diagnostics are functionally routed where possible (battery-related settings to Battery, mains/grid settings to Grid, PV/solar settings to PV, output/parallel settings to Load).
+**Settings → Add-ons → Add-on Store → ⋮ → Repositories**, then add:
 
-The exposed data includes:
+```
+https://github.com/fadmaz/siseli-ha
+```
 
-- **🔋 Battery & BMS Status**
-  - Overall Voltage, Capacity (%), Charge/Discharge Currents, Battery Type
-  - Remaining Capacity (Ah), Nominal Capacity (Ah), Min/Max Cell Voltages, and individual cell voltages (1-16)
-- **⚡ Grid & Load Status**
-  - AC Input Voltage & Mains Frequency
-  - Active Load (W), Apparent Power (VA), Output Voltage/Frequency, and Load Percentage
-- **☀️ PV Panel Status**
-  - Daily, Monthly, Yearly, and Total Electricity Generation (kWh)
-  - PV1 & PV2 Voltages, Currents, Wattage, and PV Temperatures
-- **⚙️ Advanced Device Settings ("More" tab)**
-  - Dozens of configuration points including Working Mode (SBU, UTI, etc.), Charging Priority, Output Frequencies
-  - Fan Speeds, Warning Lights, Hardware Switches (AC Charging, Main Output Relay)
-  - Customizable thresholds (Float Charging Voltage, Low Battery Alarm, Overvoltage Shutdown)
-  - Diagnostic booleans (Abnormal Fan Speed, EEPROM errors, Machine Over Temperature)
+### 3. Install and configure
 
----
+Install **Siseli Inverter Bridge**, open its **Configuration** tab, and set at minimum:
 
-## ❓ Compatibility
+| Option | What to enter |
+|---|---|
+| `MQTT_USER` / `MQTT_PASSWORD` | The credentials you created in step 1 |
+| `INVERTER_IP` | Your inverter's local IP — find it in your router's DHCP client list |
+| `ROUTER_IP` | Your router / gateway IP |
+| `INVERTER_COUNT` | How many inverters you have, if running in parallel |
+| `BATTERY_COUNT` and `BATTERY_CAPACITY_PER_BATTERY_AH` | If you want a configured bank-capacity sensor |
 
-Tested on:
+Leave `AUTO_INTERCEPT` on unless you have arranged the traffic yourself — see
+[Network setup](#network-setup).
 
-- RWB1
-- PowMr variants
-- Taico variants
+### 4. Start it
 
-_Note: It may work out-of-the-box on other Siseli-based devices listed in the Supported Brands section._
+Enable **Watchdog** and **Start on boot**, then start the add-on. Within a couple of
+minutes the log should show:
 
----
+```
+--- Siseli Inverter Bridge 2.6.8 ---
+[ARP] Interception ACTIVE: 192.168.x.x <-> 192.168.x.x
+[HA MQTT] Connected to ...
+[HA MQTT] Discovery published
+[Bridge] Sniffer started
+```
 
-## 🧪 Troubleshooting
-
-**No data appearing in Home Assistant?**
-
-- **Check MQTT Connection:** Ensure your Mosquitto broker is running and the add-on logs show a successful connection.
-- **Verify Inverter IP:** Double-check that `INVERTER_IP` and `ROUTER_IP` are exactly correct in the configuration.
-- **Set `SNIFF_IFACE` explicitly:** auto-detection picks the wrong interface on hosts with several.
-- **Pin the MAC addresses:** fill in `INVERTER_MAC` and `ROUTER_MAC` rather than relying on discovery.
-- **Check the health line:** it reports the addresses actually seen, and any non-broker inverter packets that were dropped.
-- **Turn on the right diagnostics:** set **Debug Flags** to `blocks` and `unparsed_publish` and **Log Level** to `info`. If `unparsed_publish` produces output, the payload is arriving but the block layout is unrecognised — open an issue with those lines.
-- **If ARP interception is blocked by your network:** use switch port mirroring (SPAN) toward the Home Assistant host and set `AUTO_INTERCEPT` to `false`.
-
-**After upgrading, I see duplicate or stale entities in Home Assistant**
-
-This is handled automatically from 2.6.1. On the first start after an upgrade the
-bridge clears retained discovery messages left behind by earlier versions that grouped
-sensors differently, so no manual broker cleanup is needed. The **Clean Up Stale
-Entities** option controls it if you ever need to turn it off.
-
-**Some sensors show "Unknown"**
-
-From 2.6.0 the bridge publishes a value only when it decoded one from your inverter.
-Around 38 sensors — the fault indicators, the BMS alarm flags, `Mode` and the light
-statuses — previously showed hardcoded values that were never read from the device, so
-they now read Unknown until a real decode exists for them. They are disabled by default
-on new installations.
-
-**PV Voltage, PV Current and PV Power all read zero**
-
-Expected on a single-string system: your array reports on the channel the inverter
-calls PV2, and the official app shows the same split. `Generation Power` sums both
-channels, so your totals are correct.
+Entities appear under **Settings → Devices & Services → MQTT** once the first telemetry
+payload arrives. Inverters typically report every few minutes, so give it up to ten
+minutes before concluding something is wrong.
 
 ---
 
-## 🇺🇦 Українською (Ukrainian)
+## Configuration
 
-Цей додаток дозволяє інтегрувати інвертори, сумісні з Siseli Cloud, у Home Assistant без використання зовнішніх хмар (підтримуються бренди Solar of Things, LUMINOUS NEO, PowMr, Taico та інші). Він перехоплює трафік, що йде до хмари Siseli, та автоматично створює сенсори. Повна інструкція з налаштування доступна в розділі README вище (англійською).
+Every option, with its shipped default. Most installations only need the handful listed
+in step 3 above.
+
+### Connection
+
+| Option | Default | Notes |
+|---|---|---|
+| `MQTT_HOST` | `core-mosquitto` | Use the default with the official Mosquitto add-on |
+| `MQTT_PORT` | `1883` | |
+| `MQTT_USER` / `MQTT_PASSWORD` | *(blank)* | Leave blank only if your broker allows anonymous access |
+| `TARGET_HOST` | `8.212.18.157` | The Siseli cloud. Do not change unless the cloud IP changes |
+| `TARGET_PORT` | `1883` | |
+| `INVERTER_IP` | `192.168.1.139` | **Must be set to your inverter's real IP** |
+| `ROUTER_IP` | `192.168.1.1` | **Must be set to your gateway** |
+| `INVERTER_MAC` / `ROUTER_MAC` | *(blank)* | Optional. Pin these if auto-detection picks the wrong device |
+| `AUTO_INTERCEPT` | `true` | ARP interception. Turn off only if you route the traffic yourself |
+| `SNIFF_IFACE` | *(blank)* | Advanced. Pin the capture interface if auto-detection fails |
+| `FORWARD_ALL_INVERTER_TRAFFIC` | `false` | See [the caveat below](#a-caveat-on-forwarding) |
+
+### Identity and scaling
+
+| Option | Default | Notes |
+|---|---|---|
+| `DEVICE_ID` | `siseli_inverter_1` | Letters, digits, `_` and `-` only. Changing it renames every entity |
+| `DEVICE_NAME` | `Siseli Inverter 1` | Shown in Home Assistant |
+| `MODEL_NAME` / `MANUFACTURER` | `Siseli Inverter 1` / `Siseli Compatible` | Cosmetic |
+| `ENTITY_PREFIX` | `Siseli` | Prefixed to every entity name |
+| `INVERTER_COUNT` | `1` | Scales the calculated power sensors — see below |
+| `BATTERY_COUNT` | `1` | |
+| `BATTERY_CAPACITY_PER_BATTERY_AH` | `0.0` | `0` disables the configured bank-capacity sensor |
+| `MQTT_DISCOVERY_PREFIX` | `homeassistant` | Only change for a custom discovery setup |
+| `STATE_TOPIC` / `AVAILABILITY_TOPIC` | *(blank)* | Blank derives both from `DEVICE_ID` |
+| `MQTT_RETAIN` | `true` | Keeps sensor states across a Home Assistant restart |
+
+### Timing
+
+| Option | Default | Notes |
+|---|---|---|
+| `UPDATE_INTERVAL_SEC` | `10` | Publish throttle. Raising it saves database storage |
+| `EXPIRE_AFTER_SEC` | `1800` | How long a value stays valid before Home Assistant marks it unavailable. `0` disables |
+| `TELEMETRY_TIMEOUT_SEC` | `1800` | How long without a decoded reading before the bridge marks sensors unavailable |
+
+These three interact, and the add-on **refuses to start** if they contradict each other:
+
+- `UPDATE_INTERVAL_SEC` must be less than `EXPIRE_AFTER_SEC`
+- `TELEMETRY_TIMEOUT_SEC` must not exceed `EXPIRE_AFTER_SEC`, or Home Assistant would
+  expire the sensors before the bridge decided they were stale
+
+`TELEMETRY_TIMEOUT_SEC` is also raised automatically at runtime if the bridge measures
+your inverter reporting less often than the configured value, so entities cannot flap.
+
+> **If you installed a version before 2.6.6:** Home Assistant pins an option's value the
+> first time you save the Configuration page, so an old default can outlive the release
+> that changed it. If your entities cycle between available and unavailable, check that
+> `TELEMETRY_TIMEOUT_SEC` and `EXPIRE_AFTER_SEC` both read `1800`.
+
+### Diagnostics and maintenance
+
+| Option | Default | Notes |
+|---|---|---|
+| `LOG_LEVEL` | `info` | `debug` for deep troubleshooting, `warning` for quiet logs |
+| `DEBUG_FLAGS` | *(none)* | See [Troubleshooting](#troubleshooting). Requires `LOG_LEVEL` of `info` or `debug` |
+| `DISCOVERY_CLEANUP` | `true` | Clears entities left behind by earlier versions that grouped sensors differently |
+| `RESET_ENERGY_COUNTERS` | `false` | Zeroes the calculated kWh totals. Turn on, restart once, turn back off |
+
+### Deprecated
+
+`LISTEN_PORT` and `LOG_VERBOSE` are **ignored**. They remain in the schema only so
+Supervisor does not reject the stored options on existing installations, and both are
+removed in 2.7.0. `LISTEN_PORT` in particular never did anything — the bridge has never
+opened a socket. You can ignore the `[CONFIG WARNING]` about it.
 
 ---
 
-## 📄 License
+## What you get
 
-MIT License. Free to use and modify.
+**203 sensors across 7 devices.** 146 are enabled on a fresh install; the rest are
+disabled by default and can be switched on individually in Home Assistant.
+
+| Device | Sensors | Covers |
+|---|---|---|
+| **Main** | 12 | The calculated power and energy sensors, state of charge, mode |
+| **Battery** | 45 | Voltage, current, capacity, charge/discharge state, charging setpoints |
+| **BMS** | 25 | Per-cell voltages (16), pack min/max/delta, nominal and remaining Ah, limits |
+| **Grid** | 30 | Voltage, frequency, flow direction, mains loss thresholds, relay status |
+| **Load** | 21 | Active and apparent power, load percentage, output voltage and frequency |
+| **PV** | 18 | Per-string voltage/current/power, temperatures, daily/monthly/yearly/total energy |
+| **Diagnostics** | 52 | Fan speeds, temperatures, firmware, settings echoes, raw block dumps |
+
+The Battery, BMS, Grid, Load, PV and Diagnostics devices are nested under Main in Home
+Assistant, so they appear together on one page.
+
+**Calculated sensors** are prefixed `c_` and are derived rather than read from the wire —
+battery charge/discharge power and energy, grid import power and energy, generation power,
+load power, and the configured bank capacity. The three `kWh` counters are
+`total_increasing`, so they feed the Home Assistant Energy Dashboard directly.
+
+For a value-by-value map against the official app, see
+[`sensor_mapping.md`](sensor_mapping.md).
+
+---
+
+## Parallel inverters and battery banks
+
+Set `INVERTER_COUNT` to the number of inverters sharing the dongle. The inverter reports
+per-unit figures, so the calculated sensors scale them:
+
+```
+c_load_w             = load_w            × INVERTER_COUNT
+c_generation_power_w = generation_power_w × INVERTER_COUNT
+c_mains_power_w      = mains_power_w     × INVERTER_COUNT
+```
+
+Battery power is handled differently: the BMS reports the **whole bank** already, so it is
+used unscaled. When the bridge has to fall back to the inverter's own ammeter it scales
+that by `INVERTER_COUNT` instead, so both sources stay on one basis.
+
+A quick sanity check on your own data: generation + battery discharge − battery charge
+should roughly equal load. If it does not, `INVERTER_COUNT` is probably wrong.
+
+For the configured bank capacity sensor, set `BATTERY_COUNT` and
+`BATTERY_CAPACITY_PER_BATTERY_AH` to the number of packs and the Ah printed on one of
+them. Leaving the capacity at `0` disables that sensor. Note it is a **configuration
+echo**, not a measurement — your BMS reports its own figure separately.
+
+---
+
+## Network setup
+
+### Method A — ARP interception (default, recommended)
+
+With `AUTO_INTERCEPT: true` the add-on tells the inverter that Home Assistant is the
+gateway, and tells the router that Home Assistant is the inverter. Traffic then passes
+through the Home Assistant host, where it is decoded and forwarded on.
+
+Nothing else is required. On shutdown the add-on restores both ARP caches so the inverter
+goes straight back to the real gateway.
+
+> **Some networks fight this.** UniFi, pfSense/OPNsense and enterprise switches may have
+> ARP inspection or IP-source-guard features that block spoofed replies. If interception
+> never establishes, use Method B.
+
+#### A caveat on forwarding
+
+By default the bridge relays only the inverter's **broker traffic** to
+`TARGET_HOST:TARGET_PORT`. Everything else it sends — DNS, NTP, anything to a secondary
+endpoint — is dropped, because the add-on is now the inverter's gateway but is not a
+router.
+
+For most inverters this is fine. If yours fails to reconnect, or the health line reports
+dropped packets:
+
+```
+[HEALTH] Last packet seen 12s ago; ... dropped_non_broker={'udp/53': 40}
+```
+
+set `FORWARD_ALL_INVERTER_TRAFFIC: true`.
+
+### Method B — router-side redirect (advanced, unsupported)
+
+Set `AUTO_INTERCEPT: false` and arrange for the inverter's traffic to reach the Home
+Assistant host yourself. This works only if all three hold:
+
+1. **The destination IP is preserved.** The bridge matches on
+   `TARGET_HOST:TARGET_PORT`, so a NAT or DNS rewrite that changes the destination is
+   never matched.
+2. **The host forwards packets.** The add-on does not enable `net.ipv4.ip_forward` and
+   will not relay anything in this mode. Without forwarding, the inverter loses its cloud
+   connection entirely.
+3. **The traffic is actually on the wire.** A **switch port mirror (SPAN)** to the Home
+   Assistant host is the cleanest way to satisfy all of this, and is fully passive.
+
+> **A DNS override does not work.** Pointing the Siseli domain at Home Assistant produces
+> nothing, because there is no listener — the bridge observes traffic, it does not
+> terminate it. The inverter's connection simply fails.
+
+---
+
+## Troubleshooting
+
+### No entities appear
+
+- Check the log for `[HA MQTT] Connected` and `[HA MQTT] Discovery published`. If the
+  connection fails, the MQTT credentials are wrong.
+- Check for `[ARP] Interception ACTIVE`. If it never appears, the MAC addresses could not
+  be resolved — set `INVERTER_MAC` and `ROUTER_MAC` manually.
+- The health line every 30 seconds reports which MACs the bridge is seeing:
+  `[HEALTH] Last packet seen 12s ago; inverter_macs=[...]`. If `inverter_macs` is empty,
+  no inverter traffic is reaching the capture — check `INVERTER_IP`, or pin `SNIFF_IFACE`.
+
+### Entities go unavailable and come back
+
+Check that `TELEMETRY_TIMEOUT_SEC` and `EXPIRE_AFTER_SEC` are both `1800` on the
+Configuration page. Values stored by an older release are not updated by an upgrade.
+
+### Energy Dashboard totals look wrong
+
+If the totals are inflated or were accumulated by a version before 2.6.7, set
+`RESET_ENERGY_COUNTERS` to `true`, restart the add-on once, then set it back to `false`.
+
+### PV1 reads zero on a single-string system
+
+Expected. Some inverters report the live string on the second MPPT input, and the official
+app shows the same split. `c_generation_power_w` sums both, so the total is still correct.
+
+### Your inverter is not decoded
+
+Set **Debug Flags** to `blocks` and `unparsed_publish`, and **Log Level** to `info`, for
+about two minutes — then turn them back off, because the output is per-packet. Open an
+issue with the [unsupported inverter template](.github/ISSUE_TEMPLATE/unsupported_inverter.yml)
+and attach the `[BLOCK RAW]` lines.
+
+> **Scrub your log before posting it.** The `topic=` values contain your device serial.
+
+---
+
+## Known limitations
+
+**Around 38 sensors read `Unknown` and cannot be decoded.** Earlier versions filled them
+with hardcoded constants — fault flags that could never report a fault, a `Mode` that was
+a fixed string in the source. Those were removed in 2.6.1. The entities remain, disabled
+by default, and publish an explicit "no value" rather than a comforting lie. If your
+inverter emits blocks that would decode them, an issue with a capture is welcome.
+
+**Two current sources disagree, and there is no way to tell which is right.** The BMS and
+the inverter's own ammeter can differ by a factor of two or more, in either direction. The
+official app displays both and they disagree there too. The bridge uses the BMS figure and
+logs `[ENERGY SOURCE DISAGREEMENT]` when the two diverge, rather than silently picking a
+winner. Settling this needs a clamp meter on the DC bus.
+
+**Block positions were reverse-engineered from one device.** There is no published schema.
+Values are read by position from blocks whose meaning was inferred. Where a position was
+not understood, nothing is published.
+
+---
+
+## Supported hardware
+
+Anything using the Siseli IoT cloud platform, which includes inverters sold as:
+
+Solar of Things · LUMINOUS NEO · SUN WISE · Queen Tech · LIB Life · Sun house · LeiLing ·
+SunSaviour · ECOmenic · HC solar · 沐能低碳 · PowMr · Taico
+
+**Verified in detail:** one device — `HPVINV04`, firmware `0010.11`, two inverters in
+parallel with a 32-cell battery bank. Its captures are byte-faithful fixtures in the test
+suite, and the decoded values are checked against the official app.
+
+Other brands on that list are reported to work but are not covered by captures. If you
+have one, a debug capture is the single most useful contribution you can make — see
+[Troubleshooting](#your-inverter-is-not-decoded).
+
+---
+
+## Contributing
+
+Development setup, test conventions, how to add a capture from your own inverter, and the
+release checklist are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Release history is in [`siseli_bridge/CHANGELOG.md`](siseli_bridge/CHANGELOG.md), which
+Home Assistant also renders on the add-on's **Changelog** tab.
+
+Bug reports: use the [issue templates](.github/ISSUE_TEMPLATE/). Always include your
+add-on version and a scrubbed log — this project's experience is that almost every real
+defect was found by running it on someone's hardware, not by reading the code.
+
+---
+
+## License
+
+MIT. Free to use and modify.
