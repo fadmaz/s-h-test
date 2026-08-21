@@ -174,6 +174,87 @@ class TestPackagingMetadata(unittest.TestCase):
                 self.assertTrue((ROOT / name).is_file(), f"{name} is named but absent")
 
 
+class TestDocumentationSplit(unittest.TestCase):
+    """The configuration reference lived in README.md until 2.6.13, and Supervisor's
+    Documentation tab -- which renders siseli_bridge/DOCS.md -- was empty, so users were
+    bounced to GitHub. Both halves of that are pinned here: the reference lives on the
+    tab, and the README must not grow a second copy of it. The same treatment that
+    stopped the root changelog re-growing its own history."""
+
+    MOVED = {"Requirements", "Installation", "Configuration", "Network setup", "Troubleshooting"}
+
+    def setUp(self):
+        from src.siseli_bridge.version import __version__
+
+        self.version = __version__
+        self.readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.docs = (ADDON / "DOCS.md").read_text(encoding="utf-8")
+        self.schema = _load_yaml(ADDON / "config.yaml")["schema"]
+
+    def test_the_moved_sections_live_in_exactly_one_file(self):
+        readme_heads = set(re.findall(r"^## (.+?)\s*$", self.readme, re.M))
+        docs_heads = set(re.findall(r"^## (.+?)\s*$", self.docs, re.M))
+        self.assertEqual(
+            self.MOVED & readme_heads, set(), "a section that belongs on the Documentation tab is back in the README"
+        )
+        self.assertLessEqual(self.MOVED, docs_heads, "a section left the README without arriving in DOCS.md")
+
+    def test_the_readme_carries_no_option_reference_table(self):
+        """The duplication vector is a markdown table row whose first cell is a
+        backticked option name -- README.md carried forty of them. Prose that mentions
+        an option is fine and expected, so this matches the table shape, not the name."""
+        rows = re.findall(r"^\|\s*`([A-Z][A-Z0-9_]*)`", self.readme, re.M)
+        self.assertEqual(rows, [], f"option reference rows are back in the README: {rows}")
+
+    def test_every_shipped_option_is_documented_on_the_tab(self):
+        """The invariant a user actually feels: an option in the schema that nothing
+        explains. test_every_option_is_* already ties the schema to translations, run.sh
+        and config.py; this makes the Documentation tab the last required stop."""
+        for key in sorted(self.schema):
+            with self.subTest(option=key):
+                self.assertIn(f"`{key}`", self.docs, f"{key} is shipped but undocumented")
+
+    def test_the_readme_points_at_the_tab(self):
+        self.assertIn("siseli_bridge/DOCS.md", self.readme)
+
+    def test_docs_carries_no_current_version_literal(self):
+        """DOCS.md is not in the release checklist, so a version written here goes stale
+        silently -- it held a sample startup banner reading `2.6.12` when it was split
+        out. References to *earlier* releases ("if you installed a version before 2.6.6")
+        are deliberate history and stay; only the version being shipped is forbidden."""
+        self.assertNotIn(self.version, self.docs)
+
+    def test_the_docs_tab_uses_absolute_links(self):
+        """Supervisor renders this file inside the Home Assistant frontend, where a
+        relative link resolves against the HA origin and 404s. The same links are also
+        wrong on GitHub, where they would resolve against siseli_bridge/ rather than the
+        repository root."""
+        links = re.findall(r"\]\(([^)#][^)]*)\)", self.docs)
+        relative = [link for link in links if not link.startswith(("http://", "https://", "#"))]
+        self.assertEqual(relative, [], f"relative links break on the Documentation tab: {relative}")
+
+
+class TestDocumentedCountsAreCurrent(unittest.TestCase):
+    """Three counts in the README are derived from the sensor registry and were updated
+    by hand. "Around 38 sensors read Unknown" was written when the registry held 38 such
+    keys; it held 45 by 2.6.12, and nothing noticed for eleven releases."""
+
+    def setUp(self):
+        self.readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    def test_the_undecoded_count_is_current(self):
+        from src.siseli_bridge.sensors import UNDECODED_SENSOR_KEYS
+
+        self.assertIn(f"{len(UNDECODED_SENSOR_KEYS)} sensors read", self.readme)
+
+    def test_the_sensor_totals_are_current(self):
+        from src.siseli_bridge.sensors import SENSORS
+
+        enabled = sum(1 for spec in SENSORS.values() if spec.get("enabled_by_default", True))
+        self.assertIn(f"{len(SENSORS)} sensors", self.readme)
+        self.assertIn(f"{enabled} enabled", self.readme)
+
+
 class TestDockerContext(unittest.TestCase):
     """Docker matches .dockerignore with filepath.Match semantics, where `*` does not
     cross `/`. A bare `__pycache__/` therefore matched only the context root, and

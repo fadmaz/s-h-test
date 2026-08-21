@@ -1,8 +1,10 @@
 # Contributing
 
 This file covers development setup, test conventions, how to contribute a capture from
-your own inverter, and the release checklist. `README.md` covers installation and
-configuration for users.
+your own inverter, and the release checklist. `siseli_bridge/DOCS.md` covers
+installation and configuration for users -- Home Assistant renders it on the add-on's
+**Documentation** tab, so it must never carry a version literal or it becomes a fifth
+place for the version to drift. `README.md` is the project's landing page.
 
 Keep this file current — a stale entry here is worse than none, because it is trusted.
 
