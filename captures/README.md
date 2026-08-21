@@ -1,0 +1,53 @@
+# Captures
+
+Paired readings of the same device at the same moment, from two sources:
+
+- **The bridge** — a debug log with `DEBUG_FLAGS` set wide, giving every block and every
+  token position, plus the values the add-on decoded from them.
+- **The vendor portal** — `solar.siseli.com`, device detail page, which shows the
+  manufacturer's own name and value for each field.
+
+Each file is a full comparison of the two, covering **every parameter from both sides**,
+including the ones present in only one.
+
+| Capture | Device state | Notes |
+|---|---|---|
+| [2026-08-21 13:41 — charging](2026-08-21_1341_charging.md) | Off grid, charging, PV 2.055 kW, SOC 57% | Simultaneous to the second. 202 parameters, none disagree. |
+
+## Why these exist
+
+Block positions in this project were reverse-engineered from one device with no published
+schema. A capture paired with the vendor's own display is the only way to check a decode
+against something other than itself — and the only way to find a field that is *wrong*
+rather than merely missing. Several were found exactly this way.
+
+## Taking one
+
+1. Set **Debug Flags** to at least `blocks` and `unparsed_publish` (all of them is better
+   for a reference capture), and **Log Level** to `info`. Turn them back off afterwards —
+   the output is per-packet.
+2. Open the device's *Data Overview* page on the portal.
+3. Capture both **within the same minute**. The bridge's `[... ] Published to HA` line and
+   the portal's `UpdateTime` should agree, and both should report the same inverter clock.
+4. Scrub the log before sharing it: the `topic=` value contains the device serial.
+
+## What makes a capture worth taking
+
+Roughly forty fields have a value in the portal and read `unknown` in the bridge. They are
+almost all flags, and in a healthy machine **every one of them reads its safe value** —
+`No`, `Off`, `Close`. A capture in that state cannot distinguish them no matter how
+carefully it is compared.
+
+The captures that would move things forward:
+
+| State | What it would settle |
+|---|---|
+| **Discharging** | The `Yavb` 16-bit flag word — allow-charge and allow-discharge should flip |
+| **On grid** | The mains flags and the grid-import path, which has never been exercised |
+| **After dark, PV = 0** | Whether `Solar Charging Switch` is a real setting or tracks PV power |
+| **A fan at 0%** | Whether `V4W3`[7] is the fan status, and what `Abnormal Fan Speed` reads |
+| **During any fault** | The sixteen fault flags, all of which read `No` in every capture so far |
+| **A different device** | A single inverter, or a 120 V / 60 Hz unit, would separate several fields that happen to share a value on this install |
+
+See [`../sensor_mapping_verified.md`](../sensor_mapping_verified.md) for the running
+analysis these captures feed.
