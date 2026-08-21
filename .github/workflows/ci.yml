@@ -79,22 +79,31 @@ jobs:
           # no fail_on_warning input, so warnings are reported but do not fail the job.
           path: ./siseli_bridge
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the add-on image (amd64)
-        # Plain docker build rather than home-assistant/builder: no registry auth
-        # needed, ~90s, and it catches the realistic breakage (Dockerfile edits,
-        # requirements.txt typos) that today only surfaces on a user's rebuild.
-        run: docker build siseli_bridge --build-arg BUILD_FROM=ghcr.io/hassio-addons/base:14.0.0
-
   smoke:
     # "It builds" and "the tests pass" were both true of a release that crash-looped
     # on every start: the fault was in the __main__ body, which no test executes, in
     # a file carrying a ruff F405 exemption. Only starting the thing catches that.
-    runs-on: ubuntu-latest
+    #
+    # This replaces a separate `build` job that ran `docker build` on amd64 only --
+    # scripts/smoke-test.sh already builds before it starts, so the two jobs compiled
+    # the same image twice. Same build count per commit, one more architecture.
+    strategy:
+      # Without this an amd64 failure cancels the aarch64 leg, which is the exact
+      # information the leg was added to provide.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # aarch64 is declared in config.yaml and the maintainer runs it, but it had never
+    # been built once in CI. ubuntu-24.04-arm is a native runner -- no QEMU -- and
+    # nothing in the image compiles: scapy ships py3-none-any and paho-mqtt is pure
+    # Python. Nothing in smoke-test.sh pins a platform, so it needs no changes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Start the add-on and wait for a running sniffer
+      - name: Build and start the add-on (${{ matrix.arch }})
         run: bash scripts/smoke-test.sh

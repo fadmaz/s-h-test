@@ -4,7 +4,23 @@ updates:
     directory: /
     schedule:
       interval: monthly
+
+  # pip is registered twice on purpose. The root entry sees pyproject.toml; the
+  # siseli_bridge entry sees requirements.txt, which is the file that actually ships
+  # in the image. With only the root entry, a bump would land in pyproject.toml and
+  # leave the runtime pins stale. test_packaging.py asserts the two agree, so a
+  # half-landed pair fails CI rather than shipping.
   - package-ecosystem: pip
     directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: pip
+    directory: /siseli_bridge
+    schedule:
+      interval: monthly
+
+  # The Home Assistant base image pin was watched by nothing.
+  - package-ecosystem: docker
+    directory: /siseli_bridge
     schedule:
       interval: monthly
