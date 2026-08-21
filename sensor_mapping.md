@@ -1,11 +1,25 @@
-# 📊 Siseli 100% Verified Mapping (Live HA Payload compared to Live App UI trace)
+# Historical sensor mapping — superseded
 
-> **Absolute Transparency Verified:** Using the newly minted `changed_values` logs you generated, we explicitly pull exactly how the live Home Assistant database sees the strings, side-by-side with what your App GUI reported. It is a 100% transparent translation pipeline.
+> **Superseded by [`sensor_mapping_verified.md`](sensor_mapping_verified.md).** Use that
+> file for what the bridge decodes today. This one is kept as a record of what the add-on
+> *published* around 2.6.0, which is evidence when auditing a regression — not as a
+> statement of what any position means.
 
-> **⚠️ Update for 2.6.0:** rows marked *(Not decoded — preset removed in 2.6.0)* were
-> never decoded from the wire. They came from hardcoded presets keyed on one specific
-> inverter's configuration and have been removed. The values recorded below are what
-> the bridge used to publish, not what it read.
+The original title claimed a 100% verified mapping. It was not one. Of the 193 rows
+below, 61 are marked *(Static)*, *(Hidden)* or *(Not decoded — preset removed in 2.6.0)*:
+values the bridge emitted from hardcoded presets keyed on one inverter's configuration,
+or that the official app does not display at all and so were never compared against
+anything. The comparison it describes was between the add-on's own output and an app
+screenshot, taken at different moments.
+
+The successor was built the other way round: a debug capture and the vendor portal read
+within the same minute, with every token position recorded, and every row marked with
+what it was checked against.
+
+> **Update for 2.6.0:** rows marked *(Not decoded — preset removed in 2.6.0)* were never
+> decoded from the wire. They came from hardcoded presets keyed on one specific
+> inverter's configuration and have been removed. The values recorded below are what the
+> bridge used to publish, not what it read.
 
 | Raw MQTT ID | HA Database Live State | Official App UI Real-Time Trace | HA Clean Label | Entity Location |
 |---|---|---|---|---|

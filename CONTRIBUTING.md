@@ -84,8 +84,11 @@ the same commit and say so.
 
 This is the highest-value contribution for supporting a new device.
 
-1. Ask the reporter to set `LOG_LEVEL` to `debug` for **two minutes**, then set it
-   back. Debug output is per-packet and lands on the SD card.
+1. Ask the reporter to set **Debug Flags** to `blocks` and `unparsed_publish`, with
+   **Log Level** at `info`, for **two minutes**, then clear the flags again. Output is
+   per-packet and lands on the SD card. (`LOG_LEVEL: debug` also works but floods the
+   log with everything else; the flags select exactly the lines you need. The issue
+   template, `captures/README.md` and the Documentation tab all say flags + `info`.)
 2. Ask for the `[BLOCK RAW]` lines. Have them scrub the `topic=` values (the Siseli
    cloud topic embeds the device serial) and `firmware_info` if they prefer.
 3. Take the `hex_preview` field, decode it, and paste the result into
@@ -93,6 +96,13 @@ This is the highest-value contribution for supporting a new device.
    leading `(` and a trailing `\r`, no closing paren.
 4. Record the model and firmware in a comment, and name the constant after the block
    key plus the device state it was captured in.
+
+A capture worth keeping as *reference* rather than as a fixture goes in
+[`captures/`](captures/) instead — a full comparison of the bridge's decode against the
+vendor portal, read at the same moment. [`captures/README.md`](captures/README.md) has
+the procedure and a table of which device states would settle which open questions.
+Fixtures prove the parser does not regress; reference captures are the only way to find
+a field that is *wrong* rather than merely missing.
 
 Hand-built blocks go under `SYNTH_*` and must never be used for value-parity
 assertions — a synthetic block proves nothing about what a device actually emits.
@@ -118,7 +128,7 @@ claims the new version is running.
 
 A release is a single commit touching: `siseli_bridge/CHANGELOG.md` (the canonical
 one -- the root file is just a pointer), `version.py`, `config.yaml`, and the README
-badge plus its *What is New* section.
+badge.
 
 Changelog entries follow Keep a Changelog: `## [X.Y.Z] - YYYY-MM-DD`, then
 `### Added` / `### Changed` / `### Fixed`, with bullets shaped
