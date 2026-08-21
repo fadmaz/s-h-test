@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.6.13] - 2026-08-21
 
 ### Added
 
@@ -20,7 +20,9 @@ All notable changes to this project will be documented in this file.
 - **`siseli_bridge/DOCS.md`** — Home Assistant renders this on the add-on's
   **Documentation** tab. The file did not exist, so the tab was empty and users were
   bounced out to GitHub. The reference documentation now lives there: requirements,
-  installation, every configuration option, network setup and troubleshooting.
+  installation, every configuration option, network setup and troubleshooting. This
+  deliberately reverses 2.5.0, which consolidated `DOCS.md` into the README — that
+  consolidation is what left the tab empty.
 - A CI status badge and a licence badge on the README.
 - **`SECURITY.md`**. The add-on ARP-spoofs a device on the user's LAN, holds `NET_RAW`,
   `NET_ADMIN` and `host_network`, and runs with AppArmor disabled — none of which was
