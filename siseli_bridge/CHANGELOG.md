@@ -12,6 +12,20 @@ All notable changes to this project will be documented in this file.
   the licences of the bundled dependencies.
 - PEP 639 licence metadata in `pyproject.toml`, with a test pinning the
   `setuptools>=77` build floor that the bare SPDX form requires.
+- CI now builds and starts the add-on on **aarch64** as well as amd64, using native
+  `ubuntu-24.04-arm` runners. `aarch64` has been declared in `config.yaml` all along
+  and had never once been built.
+- Dependabot now watches `siseli_bridge/requirements.txt` and the Home Assistant base
+  image pin. Neither was watched before.
+
+### Fixed
+
+- **Four development artefacts shipped inside every locally built image** --
+  `.coverage`, `siseli_bridge.egg-info/` and two `__pycache__/` directories. Docker
+  matches `.dockerignore` with `filepath.Match` semantics, where `*` does not cross
+  `/`, so the existing bare `__pycache__/` and `*.pyc` patterns matched only the
+  context root. Because the artefacts vary per machine, two developers building the
+  same commit got images with different layer hashes.
 
 ## [2.6.12] - 2026-08-21
 

@@ -174,6 +174,96 @@ class TestPackagingMetadata(unittest.TestCase):
                 self.assertTrue((ROOT / name).is_file(), f"{name} is named but absent")
 
 
+class TestDockerContext(unittest.TestCase):
+    """Docker matches .dockerignore with filepath.Match semantics, where `*` does not
+    cross `/`. A bare `__pycache__/` therefore matched only the context root, and
+    src/__pycache__, src/siseli_bridge/__pycache__, .coverage and siseli_bridge.egg-info
+    shipped in every locally built image -- changing the layer hash, so two developers
+    building the same commit got different images.
+
+    These assert the patterns rather than inspecting a built image on purpose. All four
+    artefacts are in .gitignore, so a clean CI checkout never has them and a behavioural
+    test would pass vacuously while proving nothing.
+    """
+
+    def setUp(self):
+        self.lines = [
+            line.strip()
+            for line in (ADDON / ".dockerignore").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    def test_residue_patterns_are_recursive(self):
+        for pattern in (
+            "**/__pycache__/",
+            "**/*.pyc",
+            "**/*.egg-info/",
+            "**/.coverage",
+            "**/.pytest_cache/",
+            "**/.ruff_cache/",
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, self.lines)
+
+    def test_no_residue_pattern_is_root_only(self):
+        """The regression is a pattern losing its `**/` prefix, not a pattern going
+        missing -- the root-only form looks correct and silently covers one directory."""
+        for bare in ("__pycache__/", "*.pyc", "*.egg-info/", ".coverage"):
+            with self.subTest(pattern=bare):
+                self.assertNotIn(bare, self.lines, f"{bare} matches only the context root")
+
+    def test_the_changelog_is_re_included(self):
+        """Supervisor renders the add-on's own CHANGELOG.md on the Changelog tab, so
+        the blanket *.md exclusion has to make an exception for it."""
+        self.assertIn("*.md", self.lines)
+        self.assertIn("!CHANGELOG.md", self.lines)
+
+    def test_no_build_yaml(self):
+        """Supervisor logs `uses build.yaml which is deprecated`. Without one, the
+        Dockerfile's ARG BUILD_FROM default wins -- and that default is a multi-arch
+        manifest, which is what makes a local aarch64 build work at all."""
+        self.assertFalse((ADDON / "build.yaml").exists())
+        self.assertFalse((ADDON / "build.json").exists())
+
+
+class TestPinsAgree(unittest.TestCase):
+    """Every pin in this project is written down twice, and nothing used to check that
+    the copies agreed. Dependabot raises one PR per location, so a half-landed bump is
+    the realistic failure -- and in both cases below it is the *second* copy that ships."""
+
+    def test_python_dependencies_match(self):
+        """requirements.txt is installed into the image; pyproject.toml is what CI
+        installs. A drift between them means CI tests a pin set no user runs."""
+        declared = re.search(
+            r"^dependencies\s*=\s*\[(.*?)\]", (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.S | re.M
+        )
+        self.assertIsNotNone(declared, "pyproject.toml declares no [project] dependencies")
+        project = sorted(re.findall(r'"([^"]+)"', declared.group(1)))
+
+        runtime = sorted(
+            line.strip()
+            for line in (ADDON / "requirements.txt").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+        self.assertEqual(project, runtime)
+
+    def test_the_base_image_pin_matches(self):
+        """Dependabot's docker ecosystem bumps the Dockerfile and cannot see the shell
+        script, so the smoke test would keep building against the superseded base --
+        testing an image no user would get."""
+        dockerfile = re.search(
+            r"^ARG BUILD_FROM=(\S+)", (ADDON / "Dockerfile").read_text(encoding="utf-8"), re.M
+        )
+        smoke = re.search(
+            r'^BUILD_FROM="\$\{BUILD_FROM:-(\S+?)\}"',
+            (ROOT / "scripts" / "smoke-test.sh").read_text(encoding="utf-8"),
+            re.M,
+        )
+        self.assertIsNotNone(dockerfile, "Dockerfile declares no ARG BUILD_FROM default")
+        self.assertIsNotNone(smoke, "smoke-test.sh declares no BUILD_FROM default")
+        self.assertEqual(dockerfile.group(1), smoke.group(1))
+
+
 class TestDeprecatedOptions(unittest.TestCase):
     """LISTEN_PORT was exported, validated and described in the UI as the port the
     add-on listens on. Nothing ever bound a socket -- its only consumer was a startup
