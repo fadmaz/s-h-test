@@ -1550,20 +1550,27 @@ class SolarParser:
                 state["max_utility_charge_current_a"] = max_utility
         if len(vals) >= 4:
             config_pack = vals[3]
-            if config_pack.endswith("230"):
+            # A packed word: eight settings digits followed by the configured output
+            # voltage. This used to require the tail to be exactly "230" -- the
+            # reference device's setting -- so on a 120 V, 220 V or 240 V inverter the
+            # test failed and all nine fields below silently produced nothing, with no
+            # log line. The tail is now validated as a plausible mains voltage rather
+            # than compared against one device's. It still gates the settings decode:
+            # a tail that is not a voltage means this is not the word we think it is.
+            if len(config_pack) >= 11 and config_pack.isdigit():
                 prefix = config_pack[:-3]
-                out_set_v = SolarParser._to_int(config_pack[-3:])
-                if out_set_v is not None:
+                out_set_v = SolarParser._to_int_strict(config_pack[-3:])
+                if out_set_v is not None and 100 <= out_set_v <= 300:
                     state["output_set_voltage"] = out_set_v
-                if len(prefix) >= 8:
-                    state["ac_charging_switch"] = "Close" if prefix[0] == "1" else "Open"
-                    state["charging_priority_order"] = {"1": "UTI", "2": "SOL", "3": "SNU"}.get(prefix[1], prefix[1])
-                    state["working_mode"] = {"1": "UTI", "2": "SUB", "3": "SBU"}.get(prefix[2], prefix[2])
-                    state["input_source_prompt_function"] = "On" if prefix[3] == "1" else "Off"
-                    state["eco"] = "On" if prefix[4] == "1" else "Off"
-                    state["dual_output_mode"] = "On" if prefix[5] == "1" else "Off"
-                    state["does_machine_have_output"] = "Yes" if prefix[6] == "1" else "No"
-                    state["grid_connection_function"] = "On" if prefix[7] == "1" else "Off"
+                    if len(prefix) >= 8:
+                        state["ac_charging_switch"] = "Close" if prefix[0] == "1" else "Open"
+                        state["charging_priority_order"] = {"1": "UTI", "2": "SOL", "3": "SNU"}.get(prefix[1], prefix[1])
+                        state["working_mode"] = {"1": "UTI", "2": "SUB", "3": "SBU"}.get(prefix[2], prefix[2])
+                        state["input_source_prompt_function"] = "On" if prefix[3] == "1" else "Off"
+                        state["eco"] = "On" if prefix[4] == "1" else "Off"
+                        state["dual_output_mode"] = "On" if prefix[5] == "1" else "Off"
+                        state["does_machine_have_output"] = "Yes" if prefix[6] == "1" else "No"
+                        state["grid_connection_function"] = "On" if prefix[7] == "1" else "Off"
         if len(vals) >= 5:
             aux_pack = vals[4]
             if len(aux_pack) >= 1:
