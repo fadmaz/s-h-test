@@ -153,6 +153,26 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertIn("[tool.setuptools]", text)
         self.assertIn('packages = ["src", "src.siseli_bridge"]', text)
 
+    def test_an_spdx_licence_carries_a_build_floor_that_understands_it(self):
+        """PEP 639 metadata -- `license = "MIT"` as a bare string, plus `license-files`
+        -- is a schema error on setuptools 61-76, raised inside the PEP 517 hook. It
+        does not degrade: `pip install -e ".[dev]"` fails outright, before a single
+        test runs, on every interpreter in the matrix. The two must move together."""
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        if not re.search(r"^license\s*=\s*\"", text, re.M):
+            self.skipTest("no bare-string licence declared")
+        self.assertRegex(text, r"setuptools>=(7[7-9]|[89]\d|\d{3,})")
+
+    def test_the_licence_files_named_in_pyproject_exist(self):
+        """`license-files` narrows setuptools' default glob rather than adding to it,
+        so a typo here silently ships a wheel with no licence at all."""
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        named = re.search(r"^license-files\s*=\s*\[([^\]]*)\]", text, re.M)
+        self.assertIsNotNone(named, "license-files is not declared")
+        for name in re.findall(r'"([^"]+)"', named.group(1)):
+            with self.subTest(licence_file=name):
+                self.assertTrue((ROOT / name).is_file(), f"{name} is named but absent")
+
 
 class TestDeprecatedOptions(unittest.TestCase):
     """LISTEN_PORT was exported, validated and described in the UI as the port the
