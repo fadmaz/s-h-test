@@ -1439,11 +1439,14 @@ class SolarParser:
                 state["pv2_power_w"] = pv2_power
             if pv2_voltage_primary is not None:
                 state["pv2_v"] = round(pv2_voltage_primary, 1)
-        # noeP token 3 reads 2 in every capture, sits between PV2 power and a second
-        # PV2 voltage, and the local name for it here was pv_channel_count. This device
+        # noeP token 3 is NOT the grid-connection count, and no single-inverter capture
+        # is needed to say so. It read 2 in every capture taken while PV was live, which
+        # is why it was once published as total_number_of_grid_connection -- this device
         # also has 2 parallel inverters and uxJp token 2 is also 2, so three unrelated
-        # quantities all equal 2 -- which is why it was read as a grid-connection count.
-        # A single-inverter capture reading 1 would settle it.
+        # quantities all equalled 2. The 2026-08-21 23:41 capture has it at 0 with the
+        # string dark while the portal still reported Total Number Of Grid Connection 2.
+        # It tracks PV2 activity, not topology. Left undecoded: "PV2 is producing" is
+        # not a quantity the portal names.
 
         # Temperatures -> V4W3
         vals = parsed.get("V4W3", ("", []))[1]
@@ -1483,11 +1486,21 @@ class SolarParser:
             if dc_rect_temp is not None and 0 <= dc_rect_temp <= 150:
                 state["dc_rectification_temperature_c"] = round(dc_rect_temp, 1)
 
-        # Generic computed PV total
+        # Generic computed PV total.
+        #
+        # Read only from THIS payload. It used to fall back to _shared_state.LAST_STATE,
+        # which made generation the one energy domain of four resting on a cached value
+        # -- directly against the rule that a value is published only when this payload
+        # carries evidence for it, and against the comment on the accumulator itself.
+        # This device's payloads arrive as two disjoint block sets, so the identity
+        # payload republished the previous payload's PV power every time. Harmless while
+        # Mpod and noeP keep arriving; the moment they stop at dusk the last daylight
+        # figure would be held and c_generation_energy_kwh would accrue invented kWh all
+        # night.
         pv_total_w = 0
         have_pv_total = False
         for key in ("pv_w", "pv2_power_w"):
-            val = state.get(key, _shared_state.LAST_STATE.get(key))
+            val = state.get(key)
             if isinstance(val, (int, float)):
                 pv_total_w += int(round(float(val)))
                 have_pv_total = True

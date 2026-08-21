@@ -479,15 +479,28 @@ class TestEnergyDomainGating(_ParserTestCase):
 
     def test_identity_payload_writes_no_calculated_values(self):
         """The real second payload from a live install. It carries no battery voltage
-        or current at all, yet it published a changed energy total."""
-        shared_state.LAST_STATE.update({"bat_v": 53.4, "bms_charging_current_a": 29.1})
+        or current at all, yet it published a changed energy total.
+
+        The PV keys are seeded too, and that is the point: this test seeded only the
+        battery pair until 2.6.16, so it passed while generation quietly kept a
+        LAST_STATE fallback and republished the previous payload's PV power on every
+        identity payload. A gate is only worth what its test seeds.
+        """
+        shared_state.LAST_STATE.update(
+            {"bat_v": 53.4, "bms_charging_current_a": 29.1, "pv_w": 0, "pv2_power_w": 1403}
+        )
         parser_module.LAST_ENERGY_TS["battery"] = 100.0
+        parser_module.LAST_ENERGY_TS["generation"] = 100.0
 
         state = SolarParser._try_ascii_schema(dict(captures.CAPTURE_IDENTITY))
 
         self.assertEqual([k for k in state if k.startswith("c_")], [])
+        self.assertNotIn("generation_power_w", state)
         self.assertEqual(
             parser_module.LAST_ENERGY_TS.get("battery"), 100.0, "battery clock must not advance"
+        )
+        self.assertEqual(
+            parser_module.LAST_ENERGY_TS.get("generation"), 100.0, "generation clock must not advance"
         )
 
     def test_the_two_clocks_are_independent(self):
