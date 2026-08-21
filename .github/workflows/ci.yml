@@ -68,15 +68,25 @@ jobs:
         # Defect-only rule set (see [tool.ruff.lint] in pyproject.toml). No formatter.
         run: ruff check .
 
+  # The job id is load-bearing: branch protection on main requires a check named
+  # `addon-lint`. Renaming this job blocks every PR forever, waiting on a check that
+  # no longer exists. tests/test_packaging.py asserts the id, and the protection rule
+  # has to be updated in the same change as any rename.
   addon-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Home Assistant add-on linter
-        uses: frenck/action-addon-linter@v2
+        # frenck/action-addon-linter was renamed to action-app-linter in August 2026,
+        # when Home Assistant renamed add-ons to apps. The old path still resolves, but
+        # only through GitHub's rename redirect -- which stops the day anyone creates a
+        # repository at the vacated name, and would then silently run their code.
+        # Still v2: the rename shipped as v2.21.1 and there is no v3.
+        uses: frenck/action-app-linter@v2
         with:
-          # The action accepts only entryPoint, args, path and community -- there is
-          # no fail_on_warning input, so warnings are reported but do not fail the job.
+          # The renamed action declares only `path` and `community` (plus the entryPoint
+          # and args that GitHub allows on any Docker action) -- there is still no
+          # fail_on_warning input, so warnings are reported but do not fail the job.
           path: ./siseli_bridge
 
   smoke:
