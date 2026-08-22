@@ -1,6 +1,6 @@
 # ☀️ Siseli Inverter Bridge for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-2.6.16-blue.svg)](siseli_bridge/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.6.17-blue.svg)](siseli_bridge/CHANGELOG.md)
 [![CI](https://github.com/fadmaz/siseli-ha/actions/workflows/ci.yml/badge.svg)](https://github.com/fadmaz/siseli-ha/actions/workflows/ci.yml)
 [![HA Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-green.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey.svg)](LICENSE)
@@ -61,11 +61,15 @@ vendor app keeps working. You lose the Home Assistant sensors, nothing else.
 
 ## Known limitations
 
-**45 sensors read `Unknown` and cannot be decoded.** Earlier versions filled them
+**45 of the 207 sensors read `Unknown` and cannot be decoded.** Earlier versions filled them
 with hardcoded constants — fault flags that could never report a fault, a `Mode` that was
 a fixed string in the source. Those were removed in 2.6.1. The entities remain, disabled
 by default, and publish an explicit "no value" rather than a comforting lie. If your
 inverter emits blocks that would decode them, an issue with a capture is welcome.
+
+If instead *every* sensor reads `Unknown`, that is a different situation entirely: your
+inverter speaks a protocol this add-on does not decode. The log says so in one line —
+see [Every sensor reads Unknown](https://github.com/fadmaz/siseli-ha/blob/main/siseli_bridge/DOCS.md#every-sensor-reads-unknown).
 
 **Two current sources disagree, and there is no way to tell which is right.** The BMS and
 the inverter's own ammeter can differ by a factor of two or more, in either direction. The

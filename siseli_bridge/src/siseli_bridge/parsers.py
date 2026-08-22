@@ -3,7 +3,7 @@ import json
 import re
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from . import state as _shared_state
 from .loggers import log, log_kv, json_log, log_payload_preview, log_error_always
@@ -109,6 +109,25 @@ ENERGY_DT_CLAMP_LOGGED = False
 #: monotonic, so one malformed token latches the Energy Dashboard permanently.
 MAINS_POWER_MAX_W = 100000
 GRID_VALUE_REJECTED_LOGGED = False
+
+#: Every block name _try_ascii_schema knows how to decode.
+#:
+#: This is a parallel declaration, NOT the thing the decoder loops over -- the names
+#: stay as literals inside _try_ascii_schema, because rewiring fifteen decode branches
+#: to gain a log line is exactly the kind of change nobody can re-verify without the
+#: hardware. It exists so the parser can count how many of a payload's blocks it
+#: recognised, which it previously had no way to know: a device speaking a different
+#: protocol produced an empty state and a message that read the same as a truncated
+#: token list. tests/test_truthfulness.py asserts this set against the literals.
+KNOWN_BLOCK_NAMES: FrozenSet[str] = frozenset(
+    {
+        "2ONL", "2l0E", "93VQ", "COST", "Mpod", "SUCV", "V4W3", "WdRR",
+        "Yavb", "dHrK", "eo8w", "hR6Y", "noeP", "uxJp", "v09K",
+    }
+)
+
+#: One-shot guard so a foreign device is diagnosed once, not on every payload.
+UNSUPPORTED_PROTOCOL_LOGGED = False
 #: Integration clock per energy domain. A dict rather than one global per domain, so
 #: adding a calculated energy counter does not need a new module-level name -- and so
 #: the test isolation helper has one thing to save instead of a growing list.
@@ -887,6 +906,59 @@ class SolarParser:
             return data
         except Exception:
             return None
+
+    @staticmethod
+    def _crc16_modbus(data: bytes) -> int:
+        crc = 0xFFFF
+        for byte in data:
+            crc ^= byte
+            for _ in range(8):
+                crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+        return crc
+
+    @staticmethod
+    def _describe_foreign_blocks(blocks: Dict[str, bytes]) -> Dict[str, object]:
+        """Say what a payload of unrecognised blocks actually looks like.
+
+        This feeds a log line, never a sensor, so naming a suspected protocol here is
+        a triage hint rather than a published value -- the rule against publishing
+        without evidence does not reach it. It exists because the first foreign device
+        reported (issue #30, a Beve Mega 6kW) produced fifteen unmatched names and a
+        message indistinguishable from a truncated token list, and the reporter had no
+        way to tell a wrong device from a broken add-on.
+        """
+        bodies = list(blocks.values())
+        printable = all(
+            all(0x20 <= byte <= 0x7E or byte in (0x0A, 0x0D, 0x09) for byte in body)
+            for body in bodies
+        )
+
+        # Modbus RTU: address, function, byte count, data, CRC16 little-endian. The
+        # CRC is what makes this a check rather than a shape guess -- a single false
+        # positive needs a 16-bit collision, so a handful agreeing is conclusive.
+        #
+        # Counted, not all-or-nothing. On the payload that prompted this, 9 of 13
+        # bodies verified: one carried a vendor function code and one was truncated by
+        # the debug preview itself. An all() here would have stayed silent on the very
+        # report it was written for.
+        crc_ok = sum(
+            1
+            for body in bodies
+            if len(body) > 4
+            and SolarParser._crc16_modbus(body[:-2]) == int.from_bytes(body[-2:], "little")
+        )
+
+        described: Dict[str, object] = {
+            "block_count": len(blocks),
+            "recognised": len(set(blocks) & KNOWN_BLOCK_NAMES),
+            "names": sorted(blocks.keys()),
+            "body": "ascii" if printable else "binary",
+        }
+        if crc_ok:
+            described["modbus_crc_ok"] = f"{crc_ok}/{len(bodies)}"
+        if crc_ok >= 3 and crc_ok * 2 >= len(bodies):
+            described["looks_like"] = "modbus_rtu"
+        return described
 
     @staticmethod
     def _walk_for_blocks(obj):
@@ -1944,6 +2016,30 @@ class SolarParser:
                     changed_values=changed_data,
                 )
                 return True
+
+            # Blocks arrived and decoded, but nothing came out of them. Say which of
+            # the two very different reasons it was, at warning level and without
+            # needing a debug flag -- someone whose inverter is not supported has no
+            # reason to have turned one on, which is precisely how issue #30 reached
+            # "all sensors Unknown" with nothing in the log naming the cause.
+            global UNSUPPORTED_PROTOCOL_LOGGED
+            if not UNSUPPORTED_PROTOCOL_LOGGED:
+                UNSUPPORTED_PROTOCOL_LOGGED = True
+                described = SolarParser._describe_foreign_blocks(blocks)
+                if described["recognised"] == 0:
+                    log_kv(
+                        "[UNSUPPORTED PROTOCOL]",
+                        level="warning",
+                        note="none of this device's blocks are ones this add-on decodes; it is not a supported inverter variant",
+                        **described,
+                    )
+                else:
+                    log_kv(
+                        "[NO VALUES DECODED]",
+                        level="warning",
+                        note="blocks are recognised but yielded no values; they may be truncated",
+                        **described,
+                    )
 
             if LOG_UNPARSED_PUBLISH:
                 log_payload_preview("[UNPARSED PAYLOAD: NO STATE]", payload_bytes, topic=source_topic, block_names=sorted(blocks.keys()))

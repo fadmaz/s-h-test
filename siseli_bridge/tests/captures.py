@@ -152,6 +152,64 @@ BLOCK_YAVB_REF = b"(04 1001100000000000 042.0 057.6 195.0 054 0022.3 0000.0 0292
 BLOCK_YAVB_REF_NO_TAIL = b"(04 1001100000000000 042.0 057.6 195.0 054 0022.3 0000.0 02921 000000)"
 
 # ---------------------------------------------------------------------------
+# Device B -- Beve Mega 6kW L1PE-ECO. NOT a supported device, and not decodable by
+# this add-on. Reported in issue #30 with add-on 2.6.16, every sensor Unknown.
+#
+# The DTU transport is identical -- same topic, same base64 block envelope -- but
+# the inverter's blocks are binary Modbus RTU rather than Device A's ASCII token
+# strings, and not one block name overlaps. These exist so the "this is a foreign
+# protocol" diagnostic is tested against a real foreign device instead of a
+# hand-built stand-in; nothing here is a decode target.
+#
+# Verbatim from the reporter's `hex_preview` lines, so BLOCK_*, per the naming
+# contract above. Frames are addr, function, byte count, data, CRC16 little-endian:
+# every one below verifies, except CLNi, which is length-complete but carries the
+# vendor function code 0x21 and a byte-swapped CRC.
+#
+# r8BV and Sgx0's siblings are deliberately absent: their hex_preview was cut off
+# by the debug logger itself (r8BV declares 146 data bytes and only 61 survived),
+# so they are not verbatim and must not masquerade as BLOCK_* data.
+# ---------------------------------------------------------------------------
+
+DEVB_BLOCK_ESQL = bytes.fromhex("050302f9000bd4")
+DEVB_BLOCK_FDFM = bytes.fromhex("0503100100030003000000000000000a000100d1b6")
+DEVB_BLOCK_JL4X = bytes.fromhex("05030600002a02eeffb78d")
+DEVB_BLOCK_PS4Z = bytes.fromhex(
+    "05032804007508f701000000001c026400000000007508f701d7031d031000"
+    "11000100f401040000000200c8e5"
+)
+DEVB_BLOCK_SGX0 = bytes.fromhex(
+    "05033a010001000100030000007800e6002800cc011c0234021c02a4014402"
+    "1e0000001e0066150100030003000000000000000a0001000000730726013435"
+)
+DEVB_BLOCK_ZMNP = bytes.fromhex("050382e150")
+DEVB_BLOCK_AKUG = bytes.fromhex("0503167d0726010500000014013e0158010000000000000000febe")
+DEVB_BLOCK_HIG6 = bytes.fromhex("05031070177017e6001a00e001e600f4011a00e8b9")
+DEVB_BLOCK_SEO5 = bytes.fromhex("0503026615a3eb")
+DEVB_BLOCK_XVQ9 = bytes.fromhex("05030200004984")
+DEVB_BLOCK_CLNI = bytes.fromhex("05210a0064000a0014005000288452")
+
+#: The one block in Device A's ASCII framing -- evidence the DTU wrapper is shared
+#: and only the inverter payload differs.
+DEVB_BLOCK_ARV4 = bytes.fromhex("2841434b39200d")
+
+CAPTURE_DEVICE_B_FOREIGN = {
+    "CLNi": DEVB_BLOCK_CLNI,
+    "EsQL": DEVB_BLOCK_ESQL,
+    "FDFm": DEVB_BLOCK_FDFM,
+    "Jl4X": DEVB_BLOCK_JL4X,
+    "PS4Z": DEVB_BLOCK_PS4Z,
+    "Sgx0": DEVB_BLOCK_SGX0,
+    "ZMnp": DEVB_BLOCK_ZMNP,
+    "aKuG": DEVB_BLOCK_AKUG,
+    "aRv4": DEVB_BLOCK_ARV4,
+    "hIg6": DEVB_BLOCK_HIG6,
+    "seO5": DEVB_BLOCK_SEO5,
+    "xvq9": DEVB_BLOCK_XVQ9,
+}
+
+
+# ---------------------------------------------------------------------------
 # Synthetic blocks -- structural tests only. Never assert app parity on these.
 # ---------------------------------------------------------------------------
 

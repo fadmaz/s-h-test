@@ -36,7 +36,14 @@ body:
         `info`. Let it run for about two minutes, then set Debug Flags back to empty --
         the output is per-packet and it lands on your SD card.
 
-        Paste the `[BLOCK RAW]` and `[UNPARSED PAYLOAD]` lines.
+        Paste the `[BLOCK RAW]` and `[UNPARSED PAYLOAD]` lines, and the
+        `[BLOCK SUMMARY]` line -- it names every block your device sends, which is the
+        first thing we look at.
+
+        If the log carries an `[UNSUPPORTED PROTOCOL]` line, paste that too and include
+        it verbatim. `recognised=0` with `body="binary"` means your inverter uses a
+        different protocol family rather than a variant of a supported one, and that
+        changes what the fix would involve.
 
         Please scrub the `topic=` values: the Siseli cloud topic contains your device
         serial. The block contents themselves are just readings.

@@ -13,6 +13,7 @@ including the ones present in only one.
 | Capture | Device state | Notes |
 |---|---|---|
 | [2026-08-21 13:41 — charging](2026-08-21_1341_charging.md) | Off grid, charging, PV 2.055 kW, SOC 57% | Simultaneous to the second. 202 parameters, none disagree. |
+| [2026-08-22 — Device B, unsupported](2026-08-22_device-b-modbus.md) | Beve Mega 6kW L1PE-ECO, from issue #30 | Not a decode. Records that this device speaks binary Modbus RTU inside the same DTU envelope, and what supporting it would take. |
 | [2026-08-21 23:41 — discharging](2026-08-21_2341_discharging.md) | Off grid, discharging 27.3 A, PV 0, SOC 38% | Simultaneous to the second. Pairs with the row above: retires two hypotheses, confirms three decodes. |
 
 ## Why these exist

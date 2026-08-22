@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.17] - 2026-08-22
+
+### Added
+
+- **The add-on now says when it does not recognise your inverter.** If a payload's blocks
+  decode but none are ones this add-on knows, it logs `[UNSUPPORTED PROTOCOL]` once, at
+  warning level, with no debug flag required — naming the blocks it saw, whether their
+  bodies are ASCII or binary, and whether they verify as Modbus RTU frames.
+
+  Reported in #30: a Beve Mega 6kW sent thirteen unrecognised blocks carrying binary
+  Modbus RTU. The parser correctly decoded nothing, but the only trace was an `info` line
+  that reads identically to a truncated known block and appears only with
+  `unparsed_publish` enabled. The reporter saw every sensor `Unknown` and no cause.
+- A separate `[NO VALUES DECODED]` warning for the genuinely different case where blocks
+  *are* recognised but yield no values, which the previous message conflated with the above.
+- `KNOWN_BLOCK_NAMES`, so the parser can count how many of a payload's blocks it
+  recognised. Declared in parallel with the decoder's literals rather than driving them,
+  with a test asserting the two never drift.
+- `CAPTURE_DEVICE_B_FOREIGN` — byte-faithful frames from the reporter's device, so the
+  diagnostic is tested against a real foreign protocol rather than a hand-built stand-in.
+  `captures/2026-08-22_device-b-modbus.md` records the CRC proof and register findings.
+
+### Changed
+
+- `DOCS.md` gains a troubleshooting entry titled by the symptom — **"Every sensor reads
+  Unknown"** — rather than by the diagnosis the user would have to have already reached.
+- `README.md` now reads "45 **of the 207** sensors read `Unknown`". The bare form
+  described a normal partial condition of a supported device, which is exactly how the
+  reporter of #30 concluded nothing was wrong.
+
 ## [2.6.16] - 2026-08-22
 
 ### Changed

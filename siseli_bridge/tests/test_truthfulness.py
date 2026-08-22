@@ -9,7 +9,9 @@ catch, or a calculated value derived from a payload that carried no inputs.
 Fixtures are real captures from two devices -- see tests/captures.py.
 """
 
+import inspect
 import os
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -637,6 +639,86 @@ class TestPublishThrottle(unittest.TestCase):
     def test_payload_with_no_recognised_blocks_reports_failure(self):
         self.assertFalse(SolarParser.parse_payload(envelope({"ZZZZ": b"(1 2 3)"})))
         self.publish_state.assert_not_called()
+
+
+class TestForeignProtocolIsDiagnosed(_ParserTestCase):
+    """Issue #30: a Beve Mega 6kW published fifteen block names this add-on has never
+    seen, carrying binary Modbus RTU instead of ASCII tokens. The parser did the right
+    thing and decoded nothing -- but said so only through an info-level line that reads
+    identically to a known block with a truncated token list, and only when a debug
+    flag was on. The reporter saw ~200 entities reading Unknown and no cause.
+
+    Decoding this device is out of scope. Being able to tell its owner what happened
+    is not.
+    """
+
+    def setUp(self):
+        super().setUp()
+        parser_module.UNSUPPORTED_PROTOCOL_LOGGED = False
+
+    def _warnings(self, tag, payload):
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            result = SolarParser.parse_payload(payload)
+        self.assertFalse(result)
+        return [c for c in logged.call_args_list if c.args and c.args[0] == tag]
+
+    def test_a_foreign_device_is_named_as_unsupported(self):
+        calls = self._warnings(
+            "[UNSUPPORTED PROTOCOL]", envelope(captures.CAPTURE_DEVICE_B_FOREIGN)
+        )
+        self.assertEqual(len(calls), 1)
+        reported = calls[0].kwargs
+        self.assertEqual(reported["level"], "warning", "a debug flag must not be needed to see this")
+        self.assertEqual(reported["recognised"], 0)
+        self.assertEqual(reported["block_count"], len(captures.CAPTURE_DEVICE_B_FOREIGN))
+        self.assertEqual(reported["body"], "binary")
+        self.assertEqual(reported["looks_like"], "modbus_rtu")
+
+    def test_the_verdict_is_said_once_not_on_every_payload(self):
+        """The device republishes every few seconds. A per-payload warning would bury
+        the log it is meant to make readable."""
+        payload = envelope(captures.CAPTURE_DEVICE_B_FOREIGN)
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            for _ in range(5):
+                SolarParser.parse_payload(payload)
+        tags = [c.args[0] for c in logged.call_args_list if c.args]
+        self.assertEqual(tags.count("[UNSUPPORTED PROTOCOL]"), 1)
+
+    def test_recognised_blocks_that_yield_nothing_take_the_other_branch(self):
+        """A truncated known block is a different fault from a foreign device, and the
+        old message could not tell them apart."""
+        calls = self._warnings("[NO VALUES DECODED]", envelope({"2l0E": b"("}))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].kwargs["recognised"], 1)
+        self.assertNotIn("looks_like", calls[0].kwargs)
+
+    def test_a_supported_device_is_never_called_unsupported(self):
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            SolarParser.parse_payload(envelope(captures.CAPTURE_TELEMETRY))
+        tags = [c.args[0] for c in logged.call_args_list if c.args]
+        self.assertNotIn("[UNSUPPORTED PROTOCOL]", tags)
+        self.assertNotIn("[NO VALUES DECODED]", tags)
+
+    def test_the_modbus_hint_needs_more_than_a_foreign_name(self):
+        """An ASCII foreign block must not be labelled Modbus -- the CRC is the whole
+        basis for naming a protocol in a log line, and without it this is a guess."""
+        described = SolarParser._describe_foreign_blocks({"ZZZZ": b"(1 2 3"})
+        self.assertEqual(described["body"], "ascii")
+        self.assertNotIn("looks_like", described)
+
+    def test_the_known_name_registry_matches_the_decoder(self):
+        """KNOWN_BLOCK_NAMES is declared in parallel with the literals inside
+        _try_ascii_schema rather than driving them, so nothing but this test stops the
+        two drifting -- and a stale registry makes the diagnostic above lie about how
+        many blocks were recognised."""
+        source = inspect.getsource(SolarParser._try_ascii_schema)
+        literals = set(re.findall(r'parsed\.get\("([^"]{4})"', source))
+        literals |= set(re.findall(r'"([^"]{4})" in parsed', source))
+        self.assertEqual(
+            literals,
+            set(parser_module.KNOWN_BLOCK_NAMES),
+            "KNOWN_BLOCK_NAMES and the block names _try_ascii_schema decodes have drifted",
+        )
 
 
 class TestBatteryStatusMatchesReportedPower(_ParserTestCase):
