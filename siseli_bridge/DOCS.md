@@ -288,6 +288,35 @@ Assistant host yourself. This works only if all three hold:
 
 ## Troubleshooting
 
+### Every sensor reads Unknown
+
+Not a few sensors — *all* of them, right from the first start. That means the bridge is
+seeing your inverter's traffic but does not recognise a single one of its data blocks.
+
+Check the add-on log for this line. It appears once, on its own, with no debug flags
+needed:
+
+```
+[UNSUPPORTED PROTOCOL] note="none of this device's blocks are ones this add-on decodes; ..."
+    block_count=13 recognised=0 names=[...] body="binary" looks_like="modbus_rtu"
+```
+
+`recognised=0` means your inverter speaks a protocol this add-on does not decode. This is
+not a fault in the add-on or your configuration — the bridge deliberately publishes
+nothing rather than guessing at values it cannot read.
+
+`body="binary"` is the strongest signal: supported devices send ASCII text blocks. A
+binary body, and especially `looks_like="modbus_rtu"`, means a different protocol family
+altogether rather than a variant of a supported one.
+
+Please open an [unsupported inverter issue](https://github.com/fadmaz/siseli-ha/issues/new?template=unsupported_inverter.yml)
+with that line and the `[BLOCK RAW]` output described below. Adding a protocol is real
+work, but it starts with a capture.
+
+> The entities still appear because Home Assistant creates them from the add-on's
+> discovery messages, which are published before any inverter data arrives. Entities
+> existing is not evidence that anything was decoded.
+
 ### No entities appear
 
 - Check the log for `[HA MQTT] Connected` and `[HA MQTT] Discovery published`. If the

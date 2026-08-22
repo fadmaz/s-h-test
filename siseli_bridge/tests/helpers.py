@@ -140,6 +140,7 @@ def isolated_state():
     saved_clamp_logged = parser_mod.ENERGY_DT_CLAMP_LOGGED
     saved_availability = shared_state.AVAILABILITY_ONLINE
     saved_grid_rejected = parser_mod.GRID_VALUE_REJECTED_LOGGED
+    saved_unsupported = parser_mod.UNSUPPORTED_PROTOCOL_LOGGED
     try:
         yield
     finally:
@@ -163,6 +164,7 @@ def isolated_state():
         parser_mod.ENERGY_DT_CLAMP_LOGGED = saved_clamp_logged
         shared_state.AVAILABILITY_ONLINE = saved_availability
         parser_mod.GRID_VALUE_REJECTED_LOGGED = saved_grid_rejected
+        parser_mod.UNSUPPORTED_PROTOCOL_LOGGED = saved_unsupported
 
 
 # ---------------------------------------------------------------- fake broker

@@ -243,9 +243,14 @@ class TestDocumentedCountsAreCurrent(unittest.TestCase):
         self.readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     def test_the_undecoded_count_is_current(self):
-        from src.siseli_bridge.sensors import UNDECODED_SENSOR_KEYS
+        """Both numbers, because the ratio is the point. Issue #30 reported every
+        sensor Unknown, read the bare "45 sensors read Unknown" line as describing a
+        normal condition, and had no reason to think anything was wrong."""
+        from src.siseli_bridge.sensors import SENSORS, UNDECODED_SENSOR_KEYS
 
-        self.assertIn(f"{len(UNDECODED_SENSOR_KEYS)} sensors read", self.readme)
+        self.assertIn(
+            f"{len(UNDECODED_SENSOR_KEYS)} of the {len(SENSORS)} sensors read", self.readme
+        )
 
     def test_the_sensor_totals_are_current(self):
         from src.siseli_bridge.sensors import SENSORS
