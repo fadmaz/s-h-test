@@ -179,7 +179,11 @@ Nothing tests `CONTRIBUTING.md`, the per-device counts in `DOCS.md:164-172`, or 
 
 **1. The sniffer thread can die silently while ARP poisoning continues, blackholing the inverter.**
 `core.py:612-614` starts the `AsyncSniffer` and logs `[Bridge] Sniffer started` unconditionally; the main loop at `:617-618` polls only `_state.RUNNING`, and nothing in `src/` reads `sniffer.running` or `sniffer.exception`. In the installed scapy 2.6.1 the capture socket is opened inside the sniffer thread, and a recv error *or* an exception escaping `packet_callback` closes the socket and ends the thread with `exception` still `None`; the only report goes to the `scapy.runtime` logger, which `core.py:310` sets to ERROR. `ArpSpoofer.run` (`:200-207`) keeps poisoning every 2 s on `_state.RUNNING` alone, and forwarding exists only inside `packet_callback` (`:320-325`, `:355-360`), so the inverter loses its cloud path until a manual restart. `health_logger` (`:447-483`) prints packet age and takes no action; the watchdog flips availability only after 1800-3600 s (`:433-437`), and Supervisor's Watchdog (`DOCS.md:66`) reacts to container exit only.
-Status: live defect.
+Status: **FIXED in 2.6.20.** The health loop checks capture liveness every 10 s, restarts a
+dead sniffer in place, and after three consecutive failures restores ARP and exits non-zero.
+Kept here because the first attempt at the fix called `shutdown()` from the daemon health
+thread, where the interpreter killed it mid-restore — the reusable lesson is that a teardown
+which needs a second of wall time has to run on the main thread.
 Fix: have `health_logger` or the main loop check `sniffer.running` and either restart the sniffer or clear `RUNNING` so the container exits and Supervisor restarts it. The smoke test cannot catch this; its ready marker is the same log line (`scripts/smoke-test.sh:20`).
 
 **2. The `INVERTER_COUNT` scaling basis is unproven.**
