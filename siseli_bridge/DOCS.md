@@ -342,6 +342,11 @@ The inverter's data was read correctly and the MQTT broker did not accept it, so
 reached Home Assistant. That is a broker problem, not an inverter one — see
 [No entities appear](#no-entities-appear) and check `broker=` on the health line.
 
+`Decoded but NOT published -- no broker connection yet` means the bridge has never
+managed to connect at all, rather than having lost a working connection. Look for
+`[HA MQTT] Cannot reach the broker` or `[HA MQTT ERROR] Broker refused the connection`
+above it: the first is a wrong host, port or a stopped broker, the second is credentials.
+
 `Decoded, publish throttled` is different and normal: the reading was fine and the
 publish was skipped because nothing had changed since the last one.
 

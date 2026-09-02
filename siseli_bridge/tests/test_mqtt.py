@@ -344,8 +344,8 @@ class TestBrokerReachabilityIsVisible(unittest.TestCase):
     """
 
     def setUp(self):
-        mqtt_mod.CONNECT_FAILURE_LOGGED = False
-        self.addCleanup(setattr, mqtt_mod, "CONNECT_FAILURE_LOGGED", False)
+        mqtt_mod.LAST_CONNECT_FAILURE = None
+        self.addCleanup(setattr, mqtt_mod, "LAST_CONNECT_FAILURE", None)
 
     def test_a_failed_publish_is_reported_to_the_caller(self):
         fake = FakeMqttClient(publish_rc=4)  # MQTT_ERR_NO_CONN
@@ -376,13 +376,53 @@ class TestBrokerReachabilityIsVisible(unittest.TestCase):
     def test_a_later_outage_is_reported_again(self):
         with mock.patch("src.siseli_bridge.mqtt.log_error_always"):
             mqtt_mod.on_connect_fail()
-        self.assertTrue(mqtt_mod.CONNECT_FAILURE_LOGGED)
+        self.assertEqual(mqtt_mod.LAST_CONNECT_FAILURE, "unreachable")
         with mock.patch.object(mqtt_mod, "client", FakeMqttClient()), mock.patch.object(
             mqtt_mod, "publish_discovery"
         ), mock.patch.object(mqtt_mod, "publish_availability"):
             mqtt_mod.on_connect(None, None, None, 0)
-        self.assertFalse(
-            mqtt_mod.CONNECT_FAILURE_LOGGED, "a successful connect must re-arm the report"
+        self.assertIsNone(
+            mqtt_mod.LAST_CONNECT_FAILURE, "a successful connect must re-arm the report"
+        )
+
+    def test_a_refusing_broker_is_not_logged_on_every_retry(self):
+        """Wrong credentials produce a CONNACK on every reconnect. Ungated that is one
+        error line per retry delay for as long as they stay wrong -- thousands a day."""
+        with mock.patch.object(mqtt_mod, "client", FakeMqttClient()), mock.patch(
+            "src.siseli_bridge.mqtt.log"
+        ) as logged:
+            for _ in range(6):
+                mqtt_mod.on_connect(None, None, None, 5)
+        refusals = [
+            c for c in logged.call_args_list
+            if c.args and "refused the connection" in str(c.args[0])
+        ]
+        self.assertEqual(len(refusals), 1)
+
+    def test_a_change_of_failure_kind_is_still_reported(self):
+        """A bool could not express this: an unreachable broker that later starts
+        refusing credentials is new information and must not be swallowed."""
+        with mock.patch("src.siseli_bridge.mqtt.log_error_always"):
+            mqtt_mod.on_connect_fail()
+        with mock.patch.object(mqtt_mod, "client", FakeMqttClient()), mock.patch(
+            "src.siseli_bridge.mqtt.log"
+        ) as logged:
+            mqtt_mod.on_connect(None, None, None, 5)
+        self.assertTrue(
+            any("refused the connection" in str(c.args[0]) for c in logged.call_args_list if c.args)
+        )
+
+    def test_a_raising_publish_is_not_reported_as_a_parser_error(self):
+        """It used to unwind into parse_payload's handler and print [PARSER ERROR] --
+        a broker fault attributed to the decoder."""
+        fake = FakeMqttClient()
+        fake.raise_on_publish = OSError("broker went away")
+        with mock.patch.object(mqtt_mod, "client", fake), mock.patch(
+            "src.siseli_bridge.mqtt.log_error_always"
+        ) as logged:
+            self.assertFalse(mqtt_mod.publish_grouped_state({"bat_v": 53.4}))
+        self.assertTrue(
+            any("Publish to" in str(c.args[0]) for c in logged.call_args_list if c.args)
         )
 
     def test_the_callback_is_registered_on_the_client(self):

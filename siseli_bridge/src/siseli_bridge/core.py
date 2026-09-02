@@ -635,7 +635,8 @@ def health_logger() -> None:
         if age < 0:
             log(
                 f"[HEALTH] No packets captured yet; broker="
-                f"{'up' if broker_is_connected() else 'DOWN'}",
+                f"{'up' if broker_is_connected() else 'DOWN'}; "
+                f"avail={'online' if _state.AVAILABILITY_ONLINE else 'OFFLINE'}",
                 level="info",
             )
         else:
@@ -647,7 +648,11 @@ def health_logger() -> None:
                 # broker= included because a down broker used to be invisible here:
                 # capture keeps working, this line keeps printing, and nothing reaches
                 # Home Assistant.
+                # Both silence sources, because they are different faults with the
+                # same symptom: broker=DOWN is the transport, avail=OFFLINE is the
+                # bridge declaring its own data stale while the broker is fine.
                 f"[HEALTH] broker={'up' if broker_is_connected() else 'DOWN'}; "
+                f"avail={'online' if _state.AVAILABILITY_ONLINE else 'OFFLINE'}; "
                 f"Last packet seen {int(age)}s ago; inverter_macs={inv_list}; "
                 f"router_macs={rtr_list}{extra}",
                 level="info",

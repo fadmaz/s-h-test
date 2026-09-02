@@ -703,6 +703,46 @@ class TestBatteryCurrentGuard(unittest.TestCase):
         self.assertGreater(parser_module.BATTERY_CURRENT_MAX_A, 390)
 
 
+class TestPublishOutcomeIsReportedHonestly(unittest.TestCase):
+    """2.6.21 initialised the publish outcome INSIDE `if DISCOVERY_PUBLISHED:` and read
+    it outside. On a broker that had never connected -- the exact install the change was
+    written for -- every payload raised UnboundLocalError, which the handler swallowed as
+    [PARSER ERROR], so a perfectly good decode was reported as a failure and
+    record_telemetry never ran.
+    """
+
+    def setUp(self):
+        self._ctx = isolated_state()
+        self._ctx.__enter__()
+        self.addCleanup(lambda: self._ctx.__exit__(None, None, None))
+
+    def _parse(self):
+        return SolarParser.parse_payload(envelope(captures.CAPTURE_TELEMETRY))
+
+    def test_a_payload_decodes_when_the_broker_has_never_connected(self):
+        shared_state.DISCOVERY_PUBLISHED = False
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            self.assertTrue(self._parse(), "a good payload must not be reported as a failure")
+        said = " ".join(str(c.args[0]) for c in logged.call_args_list if c.args)
+        self.assertIn("no broker connection yet", said)
+
+    def test_the_never_connected_case_is_not_called_throttled(self):
+        """Hoisting the default above the gate would have swapped the crash for a new
+        false statement: nothing is being throttled when nothing can be published."""
+        shared_state.DISCOVERY_PUBLISHED = False
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            self._parse()
+        said = " ".join(str(c.args[0]) for c in logged.call_args_list if c.args)
+        self.assertNotIn("throttled", said)
+
+    def test_every_outcome_has_a_label(self):
+        outcomes = set(parser_module.PUBLISH_OUTCOMES)
+        self.assertEqual(
+            outcomes, {"sent", "throttled", "broker-unreachable", "no-broker-yet"}
+        )
+        self.assertEqual(parser_module.PUBLISH_OUTCOMES["sent"], "Published to HA")
+
+
 class TestPublishThrottle(unittest.TestCase):
     """UPDATE_INTERVAL_SEC never suppressed a publish: the gate was
     `changed or interval elapsed`, and something always changed."""
