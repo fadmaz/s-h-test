@@ -15,11 +15,20 @@ set -euo pipefail
 
 IMAGE="${IMAGE:-siseli-bridge:smoke}"
 CONTAINER="${CONTAINER:-siseli-smoke-$$}"
-BUILD_FROM="${BUILD_FROM:-ghcr.io/hassio-addons/base:14.0.0}"
 TIMEOUT="${TIMEOUT:-60}"
 READY_MARKER="[Bridge] Sniffer started"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Read the base image out of the Dockerfile rather than restating it. The pin used to
+# be written here as well, and Dependabot's docker ecosystem only ever bumps the
+# Dockerfile -- so every bot PR left this script building against the superseded base
+# and failed the parity test that existed to notice.
+BUILD_FROM="${BUILD_FROM:-$(sed -n 's/^ARG BUILD_FROM=//p' "$HERE/siseli_bridge/Dockerfile" | head -1)}"
+if [[ -z "$BUILD_FROM" ]]; then
+    echo "!!! Could not read ARG BUILD_FROM from siseli_bridge/Dockerfile" >&2
+    exit 1
+fi
 
 cleanup() {
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true

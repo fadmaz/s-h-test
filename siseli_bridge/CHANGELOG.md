@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every Dependabot dependency PR failed CI by construction.** The runtime pins were
+  written in both `pyproject.toml` and `siseli_bridge/requirements.txt`, and the base
+  image in both the `Dockerfile` and `scripts/smoke-test.sh`, each pair held equal by a
+  test. Dependabot raises one PR per ecosystem and directory, so it could only ever bump
+  one copy — and `main` requires those checks, so the automation could not produce a
+  mergeable PR. Both facts are now single-sourced: `pyproject.toml` takes its
+  dependencies dynamically from `requirements.txt` (the file that ships in the image),
+  and `smoke-test.sh` reads `ARG BUILD_FROM` out of the `Dockerfile`. The tests assert
+  single-sourcing instead of equality.
+
 ### Changed
 
 - **`DOCS.md` no longer states the `INVERTER_COUNT` basis as fact.** It said the inverter
