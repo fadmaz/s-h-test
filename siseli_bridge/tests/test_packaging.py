@@ -234,6 +234,95 @@ class TestDocumentationSplit(unittest.TestCase):
         self.assertEqual(relative, [], f"relative links break on the Documentation tab: {relative}")
 
 
+class TestArchitectureDocAnchors(unittest.TestCase):
+    """docs/ARCHITECTURE.md cites ~185 file:line anchors, and nothing read them until
+    this. Half the sampled anchors had already drifted one working day after it was
+    written -- inserting thirty lines into parsers.py silently moved every citation
+    below them. A map whose line numbers are wrong is worse than one without any.
+
+    This pins the subset that can be resolved mechanically: wherever the prose names a
+    backticked symbol just before a citation, that symbol must actually be defined on
+    the cited line. It also refuses a citation whose file does not exist or whose line
+    is past the end. It cannot pin a citation that points at a statement rather than a
+    definition; the document's header says so.
+    """
+
+    DOC = ROOT / "docs" / "ARCHITECTURE.md"
+    BARE = {
+        "core.py": "siseli_bridge/src/siseli_bridge/core.py",
+        "parsers.py": "siseli_bridge/src/siseli_bridge/parsers.py",
+        "mqtt.py": "siseli_bridge/src/siseli_bridge/mqtt.py",
+        "sensors.py": "siseli_bridge/src/siseli_bridge/sensors.py",
+        "state.py": "siseli_bridge/src/siseli_bridge/state.py",
+        "config.py": "siseli_bridge/src/siseli_bridge/config.py",
+        "loggers.py": "siseli_bridge/src/siseli_bridge/loggers.py",
+        "version.py": "siseli_bridge/src/siseli_bridge/version.py",
+        "DOCS.md": "siseli_bridge/DOCS.md",
+        "config.yaml": "siseli_bridge/config.yaml",
+        "run.sh": "siseli_bridge/run.sh",
+        "requirements.txt": "siseli_bridge/requirements.txt",
+        "translations/en.yaml": "siseli_bridge/translations/en.yaml",
+        "CHANGELOG.md": "siseli_bridge/CHANGELOG.md",
+    }
+
+    def setUp(self):
+        if not self.DOC.is_file():
+            self.skipTest("docs/ARCHITECTURE.md is not present")
+        self.doc = self.DOC.read_text(encoding="utf-8")
+
+    def _resolve(self, cited):
+        rel = self.BARE.get(cited, cited)
+        if rel.startswith("tests/"):
+            rel = "siseli_bridge/" + rel
+        path = ROOT / rel
+        return path if path.is_file() else None
+
+    def test_every_cited_file_exists_and_every_line_is_in_range(self):
+        cites = re.findall(
+            r"`([A-Za-z0-9_./-]+\.(?:py|md|yml|yaml|sh|txt|toml)):(\d+)(?:-(\d+))?`", self.doc
+        )
+        self.assertGreater(len(cites), 100, "the citations have vanished from the map")
+        for cited, low, high in cites:
+            with self.subTest(citation=f"{cited}:{low}"):
+                path = self._resolve(cited)
+                self.assertIsNotNone(path, f"{cited} does not resolve to a file")
+                total = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+                self.assertLessEqual(
+                    int(high or low), total, f"{cited}:{high or low} is past the end ({total} lines)"
+                )
+
+    def test_a_cited_symbol_is_defined_on_the_line_it_cites(self):
+        """The check that actually catches drift. In-range proves nothing on a 2000-line
+        file; this compares the citation against the code."""
+        pattern = re.compile(
+            r"`([A-Za-z_]\w+)`.{0,200}?`([A-Za-z0-9_.]+\.py):(\d+)"
+        )
+        checked = 0
+        for symbol, cited, line_no in pattern.findall(self.doc):
+            path = self._resolve(cited)
+            if path is None:
+                continue
+            lines = path.read_text(encoding="utf-8").splitlines()
+            defined = {}
+            for i, text in enumerate(lines, 1):
+                found = re.match(r"\s*(?:def|class)\s+(\w+)", text) or re.match(
+                    r"(\w+)(?::[^=]+)?\s*=", text
+                )
+                if found:
+                    defined.setdefault(found.group(1), i)
+            if symbol not in defined:
+                continue
+            checked += 1
+            with self.subTest(symbol=symbol, citation=f"{cited}:{line_no}"):
+                self.assertEqual(
+                    int(line_no),
+                    defined[symbol],
+                    f"{cited}:{line_no} is cited for `{symbol}`, which is defined at "
+                    f"line {defined[symbol]}",
+                )
+        self.assertGreater(checked, 15, "no citations could be resolved to a symbol")
+
+
 class TestDiagnosticVocabularyIsDocumented(unittest.TestCase):
     """The diagnostic's own words are the user's only handle on an unsupported device,
     and 2.6.17 shipped a value the docs then contradicted: body="binary" was called the
