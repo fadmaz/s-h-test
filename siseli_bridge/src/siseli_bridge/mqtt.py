@@ -290,9 +290,15 @@ def publish_grouped_state(state_payload: Dict[str, object]) -> bool:
 
     delivered = True
     for group, payload in grouped_state.items():
-        result = client.publish(
-            state_topic_for_group(group), json.dumps(payload), retain=MQTT_RETAIN
-        )
+        try:
+            result = client.publish(
+                state_topic_for_group(group), json.dumps(payload), retain=MQTT_RETAIN
+            )
+        except Exception as exc:
+            # Without this the exception unwinds into parse_payload's handler and is
+            # printed as [PARSER ERROR] -- a broker fault attributed to the decoder.
+            log_error_always(f"[HA MQTT ERROR] Publish to {group} failed: {exc}")
+            return False
         if getattr(result, "rc", 0) != 0:
             delivered = False
     return delivered
@@ -306,20 +312,26 @@ def broker_is_connected() -> bool:
         return False
 
 
-#: One line per outage rather than per retry attempt. Cleared by a successful connect,
-#: so a later outage is reported again.
-CONNECT_FAILURE_LOGGED = False
+#: The KIND of connection failure currently being reported, or None while connected.
+#: A kind rather than a bool, so a repeat stays silent while a CHANGE of kind still gets
+#: its line -- an unreachable broker that later starts refusing credentials is new
+#: information, and a bool cannot express that. Written only from the paho network
+#: thread, which is the single caller of all three callbacks below.
+LAST_CONNECT_FAILURE = None
 
 
 def on_connect(_client, _userdata, _flags, rc, _properties=None):
-    global CONNECT_FAILURE_LOGGED
-    CONNECT_FAILURE_LOGGED = False
+    global LAST_CONNECT_FAILURE
     # paho does not suppress callback exceptions: anything escaping here propagates
     # out of loop_forever and kills the network thread, after which publish() queues
     # into a dead loop and the bridge goes silent with nothing in the log.
     try:
         code = int(rc) if rc is not None else -1
         if code == 0:
+            # Re-armed only on success, and only here. 2.6.21 cleared it in the
+            # preamble before rc was read, so a CONNACK that REFUSED the connection
+            # re-armed the unreachable message and the two failures cross-contaminated.
+            LAST_CONNECT_FAILURE = None
             log(f"[HA MQTT] Connected to {MQTT_HOST}:{MQTT_PORT}", level="info")
             cleanup_stale_discovery()
             publish_discovery()
@@ -327,7 +339,16 @@ def on_connect(_client, _userdata, _flags, rc, _properties=None):
             if any(v is not None for v in snapshot.values()):
                 publish_grouped_state(snapshot)
         else:
-            log(f"[HA MQTT ERROR] Connection failed with rc={code}", level="error")
+            # Gated: a refusing broker sends a CONNACK on every retry, so an ungated
+            # line here is one error every reconnect delay for as long as the
+            # credentials stay wrong -- thousands a day.
+            if LAST_CONNECT_FAILURE != f"rc={code}":
+                LAST_CONNECT_FAILURE = f"rc={code}"
+                log(
+                    f"[HA MQTT ERROR] Broker refused the connection with rc={code}"
+                    f" ({'bad credentials' if code in (4, 5) else 'see the MQTT spec'})",
+                    level="error",
+                )
     except Exception as exc:
         log_error_always(f"[HA MQTT ERROR] on_connect failed: {exc}")
 
@@ -353,10 +374,10 @@ def on_connect_fail(_client=None, _userdata=None):
     One line per outage, not per retry: paho retries every few seconds and this would
     otherwise fill the log. on_connect resets it, so a later outage is reported again.
     """
-    global CONNECT_FAILURE_LOGGED
-    if CONNECT_FAILURE_LOGGED:
+    global LAST_CONNECT_FAILURE
+    if LAST_CONNECT_FAILURE == "unreachable":
         return
-    CONNECT_FAILURE_LOGGED = True
+    LAST_CONNECT_FAILURE = "unreachable"
     log_error_always(
         f"[HA MQTT] Cannot reach the broker at {MQTT_HOST}:{MQTT_PORT}. Retrying in the "
         "background; nothing will be published to Home Assistant until it answers. "

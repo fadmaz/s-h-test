@@ -121,6 +121,19 @@ MAINS_POWER_MAX_W = 100000
 #: garbage -- the 9999 A synthetic block remains rejected.
 BATTERY_CURRENT_MAX_A = 1000
 
+#: What the per-payload line reports. Four states, not three: a broker that has never
+#: connected is not the same as one that dropped mid-run, and it is not throttling --
+#: saying "throttled" there would swap a crash for a new false statement. "Published to
+#: HA" is verbatim on purpose: captures/README.md correlates it against the vendor
+#: portal's UpdateTime, and tests/captures.py records EXPECTED_TELEMETRY's provenance
+#: from it.
+PUBLISH_OUTCOMES = {
+    "sent": "Published to HA",
+    "throttled": "Decoded, publish throttled",
+    "broker-unreachable": "Decoded but NOT published -- broker unreachable",
+    "no-broker-yet": "Decoded but NOT published -- no broker connection yet",
+}
+
 #: One-shot guard so a rejected current is reported once, not per payload.
 BATTERY_CURRENT_REJECTED_LOGGED = False
 GRID_VALUE_REJECTED_LOGGED = False
@@ -633,10 +646,12 @@ def republish_state(now: Optional[float] = None) -> bool:
     if not snapshot:
         return False
     _, publish_grouped_state = _get_mqtt_publish()
-    publish_grouped_state(snapshot)
+    delivered = publish_grouped_state(snapshot)
+    # Bookkeeping advances either way, for the same reason as the payload path: a
+    # CONNACK republishes everything, so a dropped heartbeat self-heals.
     LAST_PUBLISH_TS = now if now is not None else time.monotonic()
     PENDING_PUBLISH = False
-    return True
+    return delivered
 
 
 def _write_state_cache(snapshot: Dict[str, object], now: Optional[float] = None) -> bool:
@@ -2125,6 +2140,12 @@ class SolarParser:
                 if LOG_STATE_SNAPSHOT:
                     log_kv("[STATE SNAPSHOT]", topic=source_topic, values=snapshot)
 
+                # Set before the gate, not inside it. 2.6.21 initialised this within
+                # `if DISCOVERY_PUBLISHED:` while reading it outside, so a broker that
+                # had never connected -- the exact install the change was written for --
+                # raised UnboundLocalError on every payload, which the handler below
+                # swallowed as [PARSER ERROR] and reported as a failed decode.
+                publish_outcome = "no-broker-yet"
                 if _shared_state.DISCOVERY_PUBLISHED:
                     # Publish discovery for any late-bound raw block sensors.
                     for key in clean_state.keys():
@@ -2143,21 +2164,24 @@ class SolarParser:
                     # anything and the option did nothing at all.
                     due = PENDING_PUBLISH and elapsed >= UPDATE_INTERVAL_SEC
 
-                    delivered = None
                     if due:
-                        delivered = publish_grouped_state(snapshot)
+                        publish_outcome = (
+                            "sent" if publish_grouped_state(snapshot) else "broker-unreachable"
+                        )
+                        # Advanced even when the broker refused it: on_connect
+                        # republishes the whole snapshot on every CONNACK, so a dropped
+                        # publish self-heals and retrying at a dead socket would cost a
+                        # no-op on every payload.
                         LAST_PUBLISH_TS = now
                         PENDING_PUBLISH = False
+                    else:
+                        publish_outcome = "throttled"
 
                 # Say what actually happened. This line read "Published to HA" whether
                 # or not anything was published: it sits outside the throttle gate, and
                 # a QoS 0 publish to a dead broker is dropped without raising, so the
                 # one message a user checks was the one that could not be trusted.
-                outcome = (
-                    "Published to HA"
-                    if delivered
-                    else ("Decoded, publish throttled" if delivered is None else "Decoded but NOT published -- broker unreachable")
-                )
+                outcome = PUBLISH_OUTCOMES[publish_outcome]
                 log_kv(
                     f"[{datetime.now().strftime('%H:%M:%S')}] {outcome}",
                     level="info",

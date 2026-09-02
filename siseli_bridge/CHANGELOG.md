@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.22] - 2026-09-02
+
+### Fixed
+
+- **2.6.21 crashed on every payload when the broker had never connected** — the exact
+  install its own change was written for. The publish outcome was initialised inside
+  `if DISCOVERY_PUBLISHED:` and read outside it, so a bridge that had not yet reached the
+  broker raised `UnboundLocalError` on each payload. The handler swallowed it as
+  `[PARSER ERROR]`, `parse_payload` returned `False`, and the caller added
+  `[MQTT PAYLOAD NOT PARSED]` — two false diagnoses per payload, and `record_telemetry`
+  never ran, so the availability watchdog eventually marked every entity unavailable on a
+  bridge that was decoding perfectly.
+
+  There are now four outcomes rather than three: a broker that has never connected is not
+  the same as one that dropped mid-run, and it is not throttling. Hoisting the default
+  above the gate would have swapped the crash for a new false statement.
+- **A broker refusing the connection logged on every retry.** The failure flag was cleared
+  at the top of `on_connect` before `rc` was read, and the error branch had no gate at all,
+  so wrong credentials produced an error line every reconnect delay — thousands a day — and
+  a refusing CONNACK re-armed the *unreachable* message, cross-contaminating two different
+  faults. The flag now stores the failure *kind*, so a repeat is silent while a genuine
+  change of kind is still reported. The message also names the likely cause.
+- `republish_state` discarded the publish result and returned a literal `True` under a
+  docstring promising otherwise, so the heartbeat that keeps `expire_after` from ageing
+  entities out reported success on every tick of an outage.
+- A publish that *raises* rather than returning an error code was reported as
+  `[PARSER ERROR]` — a broker fault attributed to the decoder.
+
+### Changed
+
+- The `[HEALTH]` line reports `avail=` beside `broker=`. They are different faults with the
+  same symptom: `broker=DOWN` is the transport, `avail=OFFLINE` is the bridge declaring its
+  own data stale while the broker is fine.
+
 ## [2.6.21] - 2026-09-02
 
 ### Fixed
