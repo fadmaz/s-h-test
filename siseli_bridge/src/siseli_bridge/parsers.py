@@ -986,10 +986,11 @@ class SolarParser:
         # CRC is what makes this a check rather than a shape guess -- a single false
         # positive needs a 16-bit collision, so a handful agreeing is conclusive.
         #
-        # Counted, not all-or-nothing. On the payload that prompted this, 9 of 13
+        # Counted, not all-or-nothing. On the raw payload that prompted this, 9 of 13
         # bodies verified: one carried a vendor function code and one was truncated by
         # the debug preview itself. An all() here would have stayed silent on the very
-        # report it was written for.
+        # report it was written for. (The shipped fixture is 10 of 12 -- the truncated
+        # block was left out of it, being not verbatim.)
         crc_ok = sum(
             1
             for body in bodies
@@ -1721,6 +1722,16 @@ class SolarParser:
             if second_batt_v is not None:
                 state["second_output_battery_voltage_v"] = round(second_batt_v, 1)
         if len(vals) >= 17:
+            # dHrK[16] reads "50000" on the reference device and the portal reads 50%,
+            # so the first two digits are the value there. That rules out a zero-padded
+            # three-wide field -- 50 would render "050", giving "05000". It does NOT
+            # rule out a variable-width number left-packed into five characters, under
+            # which "10000" is 10 or 100 and neither reading can be preferred.
+            #
+            # Do not add a rule for 100 without a capture that settles it: set the
+            # second output capacity to a single digit and see whether the token reads
+            # "05000" (fixed two-digit field) or "50000" (variable width). Guessing here
+            # is precisely what 2.6.1 had to remove.
             cap_raw = vals[16].strip()
             cap_val = None
             if cap_raw.isdigit():

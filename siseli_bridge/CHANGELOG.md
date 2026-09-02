@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **`DOCS.md` no longer states the `INVERTER_COUNT` basis as fact.** It said the inverter
+  "reports per-unit figures"; the project's own captures record that as the one open
+  question no capture so far has answered. The scaling is unchanged — both readings are
+  live, and switching would swap one unproven basis for another while breaking every
+  parallel user's kWh history. The caveat notes that at the default `INVERTER_COUNT` of 1
+  the multiplication is a no-op.
+- `dHrK[16]` (`second_output_battery_capacity`) now records what its one sample proves and
+  what it does not. The token reads `50000` and the portal reads 50%, which rules out a
+  zero-padded three-wide field but leaves a variable-width number in a five-character slot
+  live — under which `10000` is 10 or 100. The arithmetic is unchanged, because a rule for
+  100 would pick between two hypotheses on no evidence. The settle condition is recorded in
+  `captures/README.md`, and the value is pinned in the golden dict.
+- Corrected two stale notes: the counted-CRC comment cited 9 of 13 against a shipped
+  fixture of 12, and the "NOT YET CAPTURED" block read "covers all of them except none".
+
 ## [2.6.18] - 2026-09-02
 
 ### Fixed

@@ -48,6 +48,7 @@ The captures that would move things forward:
 | **On grid** | The mains flags and the grid-import path, which has never been exercised |
 | **A fan at 0%** | Whether `V4W3[7]` is the fan status, and what `Abnormal Fan Speed` reads |
 | **During any fault** | The sixteen fault flags, all of which read `No` in every capture so far |
+| **Second output capacity set to a single digit** (e.g. 5%) | Whether `dHrK`[16] is a fixed two-digit field or a variable-width number in a five-character slot. `05000` means the current decode is right and 100% is simply unrepresentable; `50000` means the field is variable-width and every value above 99 is being misread |
 | **A different device** | A 120 V / 60 Hz unit would separate several fields that happen to share a value on this install |
 
 Two entries that used to be on this list are done, and one was never going to work:

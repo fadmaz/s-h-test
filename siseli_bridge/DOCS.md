@@ -182,11 +182,12 @@ load power, and the configured bank capacity. The three `kWh` counters are
 ### Which sensors are per-inverter and which are system totals
 
 This matters on a parallel installation. Sensors prefixed **`c_`** are calculated and
-scaled by `INVERTER_COUNT`; everything else is exactly what one inverter reported.
+scaled by `INVERTER_COUNT`; everything else is published unscaled, exactly as the
+inverter reported it.
 
 | | |
 |---|---|
-| `generation_power_w`, `load_w`, `pv_today_kwh`, `pv_total_kwh` | per inverter, as the vendor app shows them |
+| `generation_power_w`, `load_w`, `pv_today_kwh`, `pv_total_kwh` | unscaled, as the vendor app shows them |
 | `c_generation_power_w`, `c_load_w`, `c_generation_energy_kwh`, `c_load_energy_kwh` | system total |
 
 The `c_*` energy counters are integrated from the `c_*` power sensors, so each is on the
@@ -205,8 +206,8 @@ and the exact list of fields the bridge cannot yet decode — see
 
 ## Parallel inverters and battery banks
 
-Set `INVERTER_COUNT` to the number of inverters sharing the dongle. The inverter reports
-per-unit figures, so the calculated sensors scale them:
+Set `INVERTER_COUNT` to the number of inverters sharing the dongle. The bridge treats the
+figures on the wire as one inverter's and multiplies them:
 
 ```
 c_load_w             = load_w            × INVERTER_COUNT
@@ -217,6 +218,16 @@ c_mains_power_w      = mains_power_w     × INVERTER_COUNT
 Battery power is handled differently: the BMS reports the **whole bank** already, so it is
 used unscaled. When the bridge has to fall back to the inverter's own ammeter it scales
 that by `INVERTER_COUNT` instead, so both sources stay on one basis.
+
+> **This factor is inferred, not documented.** There is no vendor schema for this device.
+> The evidence is one installation's night-time energy balance, which is *consistent with*
+> per-inverter figures without establishing them. If the blocks turn out to carry system
+> totals already, every `c_*` power — and the kWh counters integrated from them — is high
+> by `INVERTER_COUNT`. A photograph of one inverter's rating plate, or a clamp meter on the
+> AC output compared against `c_load_w`, would settle it.
+>
+> **At the default `INVERTER_COUNT` of 1 the multiplication is a no-op**, so this affects
+> only parallel installations that have raised it.
 
 A sanity check on your own data, but **only run it at night, off grid, with PV at zero**:
 battery discharge power should exceed load by the inverter's conversion loss — expect a
