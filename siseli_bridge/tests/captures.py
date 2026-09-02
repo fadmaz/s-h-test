@@ -210,6 +210,71 @@ CAPTURE_DEVICE_B_FOREIGN = {
 
 
 # ---------------------------------------------------------------------------
+# Device C -- Falcon VMIII 4200W, firmware V1.44.5_SolarV70. NOT supported.
+# Reported in issue #32 against 2.6.17, every sensor Unknown.
+#
+# A third protocol family, and the reason the diagnostic had to stop treating
+# "not ASCII" as one bit: these bodies ARE ASCII, with a two-byte CRC16-XMODEM
+# appended, and 2.6.17 called them "binary" -- the word DOCS.md named as the
+# strongest signal of a different protocol family.
+#
+# Every body below verifies as CRC16-XMODEM (poly 0x1021, init 0x0000, big-endian)
+# computed over the frame INCLUDING the leading "(" and excluding the trailing CR.
+# 22 of 22 non-truncated blocks from the report verified; these are a representative
+# subset. `(PI30` is the protocol identifying itself -- Voltronic/Axpert PI30.
+#
+# Note what the CRC bytes did to the debug output that carried them: the bridge
+# logged the firmware as "VERFW:00025.129" and the serial as "96322406612709DN",
+# because the trailing CRC bytes happen to be printable ASCII. The real values are
+# "VERFW:00025.12" and "96322406612709".
+#
+# The two telemetry-bearing blocks, G4WT and MrfS, are absent: hex_preview capped
+# them at 64 bytes, so they are not verbatim. That cap is removed in 2.6.18.
+# ---------------------------------------------------------------------------
+
+DEVC_BLOCK_CCFT_PROTOCOL = bytes.fromhex("28504933309a0b0d")          # (PI30
+DEVC_BLOCK_EMU5_MODEL = bytes.fromhex("28564d4949492d34303030de930d")  # (VMIII-4000
+DEVC_BLOCK_AG5G_FIRMWARE = bytes.fromhex("2856455246573a30303032352e3132ab390d")
+DEVC_BLOCK_O2LC_FIRMWARE2 = bytes.fromhex("2856455246573a30303036302e3130be380d")
+DEVC_BLOCK_AHLB_SERIAL = bytes.fromhex("283936333232343036363132373039444e0d")
+DEVC_BLOCK_EZGH_NAK = bytes.fromhex("284e414b73730d")                  # (NAK
+DEVC_BLOCK_ZZ3K_SHORT = bytes.fromhex("284c06070d")                    # (L
+DEVC_BLOCK_U51Q_FLAG = bytes.fromhex("2831a93d0d")                     # (1
+DEVC_BLOCK_9GBT_SCALAR = bytes.fromhex("28303535ebbe0d")               # (055
+DEVC_BLOCK_CT7S_COUNTER = bytes.fromhex("28303032353137303033890d")
+DEVC_BLOCK_LCMP_CLOCK = bytes.fromhex("28323032363038333130343435333426c50d")
+DEVC_BLOCK_DB48_RAMP = bytes.fromhex(
+    "2830313020303230203033302030343020303530203036302030373020303830"
+    "203039302031303020313130203132300ccb0d"
+)
+DEVC_BLOCK_7V9T_SETTINGS = bytes.fromhex(
+    "2830203036302030333020303330203033302032392e32302030303020313230"
+    "2030203030303056580d"
+)
+DEVC_BLOCK_UEFO_FLAGS = bytes.fromhex(
+    "28312030303020302030203020303030203030302030303020303030302030303030"
+    "80860d"
+)
+
+CAPTURE_DEVICE_C_VOLTRONIC = {
+    "9gbt": DEVC_BLOCK_9GBT_SCALAR,
+    "7v9T": DEVC_BLOCK_7V9T_SETTINGS,
+    "DB48": DEVC_BLOCK_DB48_RAMP,
+    "EMu5": DEVC_BLOCK_EMU5_MODEL,
+    "Ezgh": DEVC_BLOCK_EZGH_NAK,
+    "UefO": DEVC_BLOCK_UEFO_FLAGS,
+    "ag5g": DEVC_BLOCK_AG5G_FIRMWARE,
+    "ahLb": DEVC_BLOCK_AHLB_SERIAL,
+    "cCft": DEVC_BLOCK_CCFT_PROTOCOL,
+    "cT7S": DEVC_BLOCK_CT7S_COUNTER,
+    "lCMp": DEVC_BLOCK_LCMP_CLOCK,
+    "o2lC": DEVC_BLOCK_O2LC_FIRMWARE2,
+    "u51Q": DEVC_BLOCK_U51Q_FLAG,
+    "zZ3K": DEVC_BLOCK_ZZ3K_SHORT,
+}
+
+
+# ---------------------------------------------------------------------------
 # Synthetic blocks -- structural tests only. Never assert app parity on these.
 # ---------------------------------------------------------------------------
 

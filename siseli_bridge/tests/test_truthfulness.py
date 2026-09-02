@@ -706,6 +706,56 @@ class TestForeignProtocolIsDiagnosed(_ParserTestCase):
         self.assertEqual(described["body"], "ascii")
         self.assertNotIn("looks_like", described)
 
+    def test_the_crc16_xmodem_helper_matches_known_frames(self):
+        """Hand-computed from real wire bytes. Pins the polynomial, the init value and
+        -- the part that is easy to tidy away -- that the CRC covers the leading paren.
+        Excluding it matches nothing at all."""
+        self.assertEqual(SolarParser._crc16_xmodem(b"(PI30"), 0x9A0B)
+        self.assertEqual(SolarParser._crc16_xmodem(b"(NAK"), 0x7373)
+        self.assertEqual(SolarParser._crc16_xmodem(b"(VMIII-4000"), 0xDE93)
+        self.assertNotEqual(SolarParser._crc16_xmodem(b"PI30"), 0x9A0B)
+
+    def test_an_ascii_device_with_a_checksum_is_not_called_binary(self):
+        """Issue #32, the defect this fixes. 2.6.17 called a plainly-textual device
+        binary because of a two-byte CRC, and the docs name binary as the strongest
+        signal of a different protocol family."""
+        described = SolarParser._describe_foreign_blocks(captures.CAPTURE_DEVICE_C_VOLTRONIC)
+        self.assertEqual(described["body"], "ascii+binary_tail")
+        self.assertNotEqual(described["body"], "binary")
+        self.assertEqual(described["looks_like"], "voltronic_pi30")
+        self.assertEqual(described["recognised"], 0)
+
+    def test_the_modbus_device_does_not_regress_to_voltronic(self):
+        """Issue #30's payload contains exactly one valid Voltronic frame -- its DTU
+        emits an ACK in that framing while the data blocks are Modbus. That single
+        frame is why both hints are counted and thresholded rather than any-match."""
+        described = SolarParser._describe_foreign_blocks(captures.CAPTURE_DEVICE_B_FOREIGN)
+        self.assertEqual(described["body"], "binary")
+        self.assertEqual(described["looks_like"], "modbus_rtu")
+        self.assertEqual(described["voltronic_crc_ok"], "1/12")
+
+    def test_the_ack_frame_alone_never_names_a_protocol(self):
+        """The threshold is set by observed data, not picked: one valid frame out of
+        twelve must not label a payload."""
+        described = SolarParser._describe_foreign_blocks(
+            {"aRv4": captures.DEVB_BLOCK_ARV4}
+        )
+        self.assertNotIn("looks_like", described)
+
+    def test_a_supported_device_gets_no_protocol_hint(self):
+        described = SolarParser._describe_foreign_blocks(captures.CAPTURE_TELEMETRY)
+        self.assertEqual(described["body"], "ascii")
+        self.assertNotIn("looks_like", described)
+        self.assertEqual(described["recognised"], len(captures.CAPTURE_TELEMETRY))
+
+    def test_mixed_payloads_report_every_shape_present(self):
+        """A payload that is part text and part binary is itself the signal, and the
+        headline takes the worst shape so nothing is understated."""
+        described = SolarParser._describe_foreign_blocks(captures.CAPTURE_DEVICE_B_FOREIGN)
+        self.assertIn("body_shapes", described)
+        self.assertIn("ascii=1", described["body_shapes"])
+        self.assertIn("binary=11", described["body_shapes"])
+
     def test_the_known_name_registry_matches_the_decoder(self):
         """KNOWN_BLOCK_NAMES is declared in parallel with the literals inside
         _try_ascii_schema rather than driving them, so nothing but this test stops the

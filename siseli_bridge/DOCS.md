@@ -298,16 +298,34 @@ needed:
 
 ```
 [UNSUPPORTED PROTOCOL] note="none of this device's blocks are ones this add-on decodes; ..."
-    block_count=13 recognised=0 names=[...] body="binary" looks_like="modbus_rtu"
+    block_count=13 recognised=0 names=[...] body="binary"
+    body_shapes="ascii=1,binary=11" modbus_crc_ok="10/12" looks_like="modbus_rtu"
 ```
 
-`recognised=0` means your inverter speaks a protocol this add-on does not decode. This is
-not a fault in the add-on or your configuration — the bridge deliberately publishes
-nothing rather than guessing at values it cannot read.
+```
+[UNSUPPORTED PROTOCOL] ... block_count=14 recognised=0 names=[...]
+    body="ascii+binary_tail" body_shapes="ascii=3,ascii+binary_tail=11"
+    voltronic_crc_ok="14/14" looks_like="voltronic_pi30"
+```
 
-`body="binary"` is the strongest signal: supported devices send ASCII text blocks. A
-binary body, and especially `looks_like="modbus_rtu"`, means a different protocol family
-altogether rather than a variant of a supported one.
+**`recognised=0` is the verdict.** Your inverter speaks a protocol this add-on does not
+decode, whatever the other fields say. This is not a fault in the add-on or your
+configuration — the bridge deliberately publishes nothing rather than guessing at values
+it cannot read.
+
+`body` describes the *shape* of the blocks, not whether they are supported. A device can
+be perfectly readable text and still be a protocol this add-on knows nothing about:
+
+| `body` | Meaning |
+|---|---|
+| `ascii` | Plain text blocks, the same shape supported devices use |
+| `ascii+binary_tail` | Text with a short checksum appended — common in the Voltronic/PI30 family |
+| `binary` | Not text at all |
+
+`looks_like` is the only protocol *claim*, and it is printed only when a checksum computed
+over the blocks actually verifies against the bytes on the wire — so it is evidence rather
+than a guess. `body_shapes` breaks down a mixed payload; a device whose data blocks are one
+family and whose acknowledgements are another will show both.
 
 Please open an [unsupported inverter issue](https://github.com/fadmaz/siseli-ha/issues/new?template=unsupported_inverter.yml)
 with that line and the `[BLOCK RAW]` output described below. Adding a protocol is real

@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.18] - 2026-09-02
+
+### Fixed
+
+- **The unsupported-protocol diagnostic called a plainly-textual device "binary"**
+  (issue #32, a Falcon VMIII 4200W). 2.6.17 collapsed every byte of every block into one
+  boolean, so a two-byte checksum anywhere forced `body="binary"` — the word `DOCS.md`
+  named as the strongest signal of a different protocol family. Bodies are now classified
+  individually as `ascii`, `ascii+binary_tail` or `binary`, and a mixed payload reports
+  every shape it contains.
+- **`[BLOCK RAW]` truncated `hex_preview` at 64 bytes with no marker.** That is the exact
+  field `CONTRIBUTING.md` asks reporters to paste, and a truncated body cannot become a
+  `BLOCK_*` fixture. It silently cut issue #30's `r8BV` mid-frame and both of issue #32's
+  telemetry-bearing blocks — the two most valuable in the report. It now uses the
+  `hex_preview` helper that was already in `loggers.py`, which marks truncation.
+
+### Added
+
+- **`looks_like="voltronic_pi30"`.** Issue #32's device is the Voltronic/Axpert PI30
+  family: 22 of 22 non-truncated blocks verify as CRC16-XMODEM computed over the frame
+  *including* the leading `(`, and one block is literally `(PI30`. Reported on the same
+  evidence footing as the Modbus hint — a checksum that verifies against the wire, never a
+  shape guess.
+- `voltronic_crc_ok` and `body_shapes` alongside the existing `modbus_crc_ok`.
+- `CAPTURE_DEVICE_C_VOLTRONIC` — 14 byte-faithful blocks from issue #32. The two hints are
+  counted and thresholded rather than any-match because issue #30's Modbus device emits
+  exactly one valid Voltronic frame, `(ACK9`; a single match must not label a payload, and
+  a test now pins that.
+
+### Changed
+
+- `DOCS.md` no longer presents `body` as the verdict. `recognised=0` is the verdict;
+  `body` describes shape, and `looks_like` is the only protocol claim. Each shape is
+  explained in a table, and a test asserts every shape the code can emit is documented.
+
 ## [2.6.17] - 2026-08-22
 
 ### Added
