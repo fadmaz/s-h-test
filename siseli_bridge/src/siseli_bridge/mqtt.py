@@ -275,17 +275,45 @@ def cleanup_stale_discovery() -> int:
     return cleared
 
 
-def publish_grouped_state(state_payload: Dict[str, object]) -> None:
+def publish_grouped_state(state_payload: Dict[str, object]) -> bool:
+    """Publish one state topic per device group. True when every publish was accepted.
+
+    The return value exists because paho does not raise when the broker is gone: a
+    QoS 0 publish on a disconnected client returns MQTT_ERR_NO_CONN and the message is
+    dropped. Every call site used to discard that, so the bridge reported "Published to
+    HA" for payloads that reached nothing.
+    """
     grouped_state: Dict[str, Dict[str, object]] = {}
     for key, value in list(state_payload.items()):
         group = get_sensor_group(key)
         grouped_state.setdefault(group, {})[key] = value
 
+    delivered = True
     for group, payload in grouped_state.items():
-        client.publish(state_topic_for_group(group), json.dumps(payload), retain=MQTT_RETAIN)
+        result = client.publish(
+            state_topic_for_group(group), json.dumps(payload), retain=MQTT_RETAIN
+        )
+        if getattr(result, "rc", 0) != 0:
+            delivered = False
+    return delivered
+
+
+def broker_is_connected() -> bool:
+    """Whether the client currently has a live connection to the broker."""
+    try:
+        return bool(client.is_connected())
+    except Exception:
+        return False
+
+
+#: One line per outage rather than per retry attempt. Cleared by a successful connect,
+#: so a later outage is reported again.
+CONNECT_FAILURE_LOGGED = False
 
 
 def on_connect(_client, _userdata, _flags, rc, _properties=None):
+    global CONNECT_FAILURE_LOGGED
+    CONNECT_FAILURE_LOGGED = False
     # paho does not suppress callback exceptions: anything escaping here propagates
     # out of loop_forever and kills the network thread, after which publish() queues
     # into a dead loop and the bridge goes silent with nothing in the log.
@@ -313,7 +341,31 @@ def on_disconnect(_client, _userdata, rc, _properties=None):
         log_error_always(f"[HA MQTT ERROR] on_disconnect failed: {exc}")
 
 
+def on_connect_fail(_client=None, _userdata=None):
+    """paho reports an unreachable broker only here.
+
+    connect_async plus loop_start retries forever in the network thread, and on_connect
+    fires only on a CONNACK -- so its rc != 0 branch covers a broker that answers and
+    refuses, never one that is not there. Without this callback a wrong MQTT_HOST, a
+    stopped broker or a blocked port produced no output at all, while the parser went
+    on logging "Published to HA" for every payload.
+
+    One line per outage, not per retry: paho retries every few seconds and this would
+    otherwise fill the log. on_connect resets it, so a later outage is reported again.
+    """
+    global CONNECT_FAILURE_LOGGED
+    if CONNECT_FAILURE_LOGGED:
+        return
+    CONNECT_FAILURE_LOGGED = True
+    log_error_always(
+        f"[HA MQTT] Cannot reach the broker at {MQTT_HOST}:{MQTT_PORT}. Retrying in the "
+        "background; nothing will be published to Home Assistant until it answers. "
+        "Check the host, the port, and that the broker is running."
+    )
+
+
 client.on_connect = on_connect
+client.on_connect_fail = on_connect_fail
 client.on_disconnect = on_disconnect
 
 

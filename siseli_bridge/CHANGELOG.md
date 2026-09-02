@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.21] - 2026-09-02
+
+### Fixed
+
+- **The battery-current guards rejected real readings, silently.** Four guards dropped any
+  current outside `0..300` A — below what this hardware declares for itself, since the
+  reference device reports a `bms_charge_current_limit_a` of **390 A**. A reading between
+  the two was discarded with nothing published and nothing logged, and the consequences ran
+  on from there: the surviving source was then used without the
+  `[ENERGY SOURCE DISAGREEMENT]` warning, which only fires when both are present, and if
+  both were dropped the charge and discharge power both read 0 and `battery_status`
+  reported **Idle**. A high-current moment presented as an idle battery contributing no
+  energy. The bound is now 1000 A and a rejection is reported once as
+  `[BATTERY CURRENT REJECTED]`, naming the field and the bound.
+- **An unreachable MQTT broker produced no diagnostic at all, and the log said the
+  opposite.** `connect_async` plus `loop_start` retries forever in paho's network thread
+  and reports a failed connect only through `on_connect_fail`, which nothing registered;
+  `on_connect` fires only on a CONNACK, so its error branch covered a broker that answers
+  and refuses and never one that is absent. Meanwhile a QoS 0 publish on a disconnected
+  client returns `MQTT_ERR_NO_CONN` and is dropped without raising, and every call site
+  discarded that return — so the bridge logged **"Published to HA" for payloads that
+  reached nothing**.
+
+  `on_connect_fail` is now registered and reports once per outage (re-armed by a
+  successful connect, so a later one is reported again). `publish_grouped_state` returns
+  whether the broker accepted the publish, and the per-payload line says which of three
+  things happened: `Published to HA`, `Decoded, publish throttled`, or
+  `Decoded but NOT published -- broker unreachable`. The `[HEALTH]` line now opens with
+  `broker=up` or `broker=DOWN`.
+
+### Changed
+
+- `DOCS.md` no longer says a failed MQTT connection means the credentials are wrong. That
+  is one of two failures and not the one a stopped broker produces.
+
 ## [2.6.20] - 2026-09-02
 
 ### Fixed

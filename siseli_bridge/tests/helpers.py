@@ -141,6 +141,7 @@ def isolated_state():
     saved_availability = shared_state.AVAILABILITY_ONLINE
     saved_grid_rejected = parser_mod.GRID_VALUE_REJECTED_LOGGED
     saved_unsupported = parser_mod.UNSUPPORTED_PROTOCOL_LOGGED
+    saved_current_rejected = parser_mod.BATTERY_CURRENT_REJECTED_LOGGED
     try:
         yield
     finally:
@@ -165,6 +166,7 @@ def isolated_state():
         shared_state.AVAILABILITY_ONLINE = saved_availability
         parser_mod.GRID_VALUE_REJECTED_LOGGED = saved_grid_rejected
         parser_mod.UNSUPPORTED_PROTOCOL_LOGGED = saved_unsupported
+        parser_mod.BATTERY_CURRENT_REJECTED_LOGGED = saved_current_rejected
 
 
 # ---------------------------------------------------------------- fake broker
@@ -192,7 +194,10 @@ class FakeMqttClient:
         self.loop_started = False
         self.disconnected = False
         self.on_connect = None
+        self.on_connect_fail = None
         self.on_disconnect = None
+        #: what is_connected() reports; publish_rc drives whether a publish is accepted
+        self.connected = True
         self.publish_rc = publish_rc
         #: set to an Exception instance to simulate the broker going away
         self.raise_on_publish = None
@@ -228,6 +233,10 @@ class FakeMqttClient:
 
     def disconnect(self):
         self.disconnected = True
+        self.connected = False
+
+    def is_connected(self):
+        return self.connected
 
     # --- assertion sugar ----------------------------------------------------
     def topics(self):
