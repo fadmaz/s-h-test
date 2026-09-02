@@ -81,6 +81,18 @@ TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "1800"))
 TELEMETRY_TIMEOUT_MULTIPLIER = float(os.getenv("TELEMETRY_TIMEOUT_MULTIPLIER", "3"))
 TELEMETRY_TIMEOUT_CEILING_SEC = int(os.getenv("TELEMETRY_TIMEOUT_CEILING_SEC", "3600"))
 
+# How long after process start the sensors stay available before any payload has been
+# decoded. Separate from TELEMETRY_TIMEOUT_SEC, which it used to borrow: the grace was
+# the full 1800 s timeout, so a restart on an install whose inverter had gone quiet
+# presented the previous run's cached values as current for half an hour.
+#
+# 600 s is the largest gap ever measured between decoded payloads on the reference
+# device, so a device reporting normally will have produced its first payload inside it.
+# That is an inference from a related quantity, not a measurement of this one: nothing
+# has yet timed process start to first decoded payload across several restarts. Same
+# env-only treatment and the same reason as its two neighbours above.
+STARTUP_GRACE_SEC = int(os.getenv("STARTUP_GRACE_SEC", "600"))
+
 # Largest interval the energy integrator will credit in one step. Its job is to stop a
 # clock jump or a suspended process dumping a fabricated block of kWh -- NOT to bound
 # normal operation. It was previously derived from UPDATE_INTERVAL_SEC, which is an

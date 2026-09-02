@@ -65,7 +65,7 @@ def observed_telemetry_interval() -> float:
 def record_telemetry(now: Optional[float] = None) -> None:
     """Stamp a decoded payload and remember the gap since the previous one."""
     global LAST_TELEMETRY_TS
-    now = now if now is not None else time.time()
+    now = now if now is not None else time.monotonic()
     previous = LAST_TELEMETRY_TS
     if previous and now > previous:
         TELEMETRY_INTERVALS.append(now - previous)

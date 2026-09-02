@@ -390,6 +390,30 @@ class TestAvailabilityWatchdog(_CoreTestCase):
         shared_state.LAST_TELEMETRY_TS = 1000.0
         self.assertFalse(core.telemetry_is_fresh(now=1000.0 + core.TELEMETRY_TIMEOUT_SEC + 1))
 
+    def test_the_startup_grace_expires_well_inside_the_telemetry_timeout(self):
+        """The grace used to be the telemetry timeout itself, so a restart on an install
+        whose inverter had gone quiet showed the restored cache as live for 1800 s. It is
+        its own, shorter bound now."""
+        shared_state.LAST_TELEMETRY_TS = 0.0
+        with mock.patch.object(core, "PROCESS_START_TS", 5000.0):
+            self.assertTrue(core.telemetry_is_fresh(now=5000.0 + 10))
+            self.assertTrue(core.telemetry_is_fresh(now=5000.0 + core.STARTUP_GRACE_SEC - 1))
+            self.assertFalse(
+                core.telemetry_is_fresh(now=5000.0 + core.STARTUP_GRACE_SEC + 1),
+                "cached values are still being asserted live past the grace",
+            )
+        self.assertLess(
+            core.STARTUP_GRACE_SEC,
+            core.TELEMETRY_TIMEOUT_SEC,
+            "the grace must be shorter than the timeout it used to borrow",
+        )
+
+    def test_the_grace_does_not_shadow_the_timeout_once_telemetry_exists(self):
+        """Once a payload has landed the normal timeout governs, not the grace."""
+        with mock.patch.object(core, "PROCESS_START_TS", 5000.0):
+            shared_state.LAST_TELEMETRY_TS = 5000.0
+            self.assertTrue(core.telemetry_is_fresh(now=5000.0 + core.STARTUP_GRACE_SEC + 60))
+
     def test_a_restart_does_not_immediately_blank_every_sensor(self):
         """Without a grace period every restart shows ~200 unavailable entities for
         the whole timeout."""

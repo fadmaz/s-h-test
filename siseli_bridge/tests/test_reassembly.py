@@ -119,12 +119,12 @@ class TestMissingSegmentRecovery(_FlowTestCase):
         append_stream_data(FLOW, 1000, packet)
         gap_seq = 1000 + len(packet) * 2
 
-        with mock.patch.object(parser_module.time, "time", return_value=10_000.0):
+        with mock.patch.object(parser_module.time, "monotonic", return_value=10_000.0):
             append_stream_data(FLOW, gap_seq, packet)
             self.assertIsNotNone(FLOW_STATES[FLOW].gap_since)
 
         later = 10_000.0 + parser_module.STREAM_GAP_TIMEOUT_SEC + 1
-        with mock.patch.object(parser_module.time, "time", return_value=later):
+        with mock.patch.object(parser_module.time, "monotonic", return_value=later):
             append_stream_data(FLOW, gap_seq + len(packet), packet)
 
         self.assertIsNone(FLOW_STATES[FLOW].gap_since, "the gap must be abandoned")
@@ -136,8 +136,8 @@ class TestMissingSegmentRecovery(_FlowTestCase):
         append_stream_data(FLOW, 1000, packet)
         state = FLOW_STATES[FLOW]
 
-        state.last_seen = time.time()
-        state.last_progress = time.time() - 200
+        state.last_seen = time.monotonic()
+        state.last_progress = time.monotonic() - 200
 
         refreshed = get_flow_state(FLOW)
         self.assertIsNone(refreshed.next_seq, "a flow making no progress must reset")

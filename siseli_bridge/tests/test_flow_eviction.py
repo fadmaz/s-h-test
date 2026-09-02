@@ -26,7 +26,7 @@ class TestFlowEviction(unittest.TestCase):
     def test_stale_flow_removed_by_eviction(self):
         key = self._key()
         state = get_flow_state(key)
-        state.last_seen = time.time() - 200  # well past STREAM_STALE_SECONDS (30)
+        state.last_seen = time.monotonic() - 200  # well past STREAM_STALE_SECONDS (30)
 
         _evict_stale_flows()
 
@@ -45,7 +45,7 @@ class TestFlowEviction(unittest.TestCase):
         stale_key = self._key(sport=2)
 
         get_flow_state(active_key)
-        get_flow_state(stale_key).last_seen = time.time() - 200
+        get_flow_state(stale_key).last_seen = time.monotonic() - 200
 
         _evict_stale_flows()
 
@@ -59,7 +59,7 @@ class TestFlowEviction(unittest.TestCase):
         # The reset keys off last_progress, not last_seen. Using last_seen meant a
         # flow wedged behind a missing segment kept itself alive indefinitely,
         # because parking a segment counts as activity.
-        state.last_progress = time.time() - 200
+        state.last_progress = time.monotonic() - 200
 
         fresh = get_flow_state(key)  # should call state.reset()
 
@@ -71,7 +71,7 @@ class TestFlowEviction(unittest.TestCase):
 
         stale_key = self._key(sport=9999)
         state = TcpFlowState()
-        state.last_seen = time.time() - 200
+        state.last_seen = time.monotonic() - 200
         FLOW_STATES[stale_key] = state
 
         # Force the counter to trigger on the next get_flow_state call

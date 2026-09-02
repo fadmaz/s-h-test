@@ -277,7 +277,7 @@ def handle_inverter_tcp_packet(pkt) -> None:
 def packet_callback(pkt) -> None:
     global INV_MAC, RTR_MAC, LAST_PACKET_TS
 
-    LAST_PACKET_TS = time.time()
+    LAST_PACKET_TS = time.monotonic()
 
     if IP not in pkt or Ether not in pkt:
         return
@@ -360,7 +360,7 @@ def packet_callback(pkt) -> None:
                 log(f"[FWD ERROR] router->inverter {exc}", level="error")
 
 
-PROCESS_START_TS = time.time()
+PROCESS_START_TS = time.monotonic()
 ADAPTIVE_TIMEOUT_LOGGED = False
 
 
@@ -406,13 +406,15 @@ def telemetry_is_fresh(now: Optional[float] = None) -> bool:
     for any packet matching the capture filter -- bare ACKs included -- and so stays
     fresh long after the cloud stream has stopped carrying data.
     """
-    now = now if now is not None else time.time()
+    now = now if now is not None else time.monotonic()
     timeout = effective_telemetry_timeout()
     last = _state.LAST_TELEMETRY_TS
     if not last:
-        # Startup grace: do not mark 200 entities unavailable for three minutes
-        # every time the add-on restarts.
-        return (now - PROCESS_START_TS) < timeout
+        # Startup grace: do not mark 200 entities unavailable for three minutes every
+        # time the add-on restarts. Bounded by STARTUP_GRACE_SEC rather than by the
+        # telemetry timeout it used to borrow -- that made the grace 1800 s, long
+        # enough to present a restored cache as live data for half an hour.
+        return (now - PROCESS_START_TS) < STARTUP_GRACE_SEC
     return (now - last) < timeout
 
 
@@ -468,7 +470,7 @@ def health_logger() -> None:
         if ticks % 3:
             continue
 
-        age = time.time() - LAST_PACKET_TS if LAST_PACKET_TS else -1
+        age = time.monotonic() - LAST_PACKET_TS if LAST_PACKET_TS else -1
         if age < 0:
             log("[HEALTH] No packets captured yet", level="info")
         else:
@@ -591,8 +593,8 @@ if __name__ == "__main__":
 
     if AUTO_INTERCEPT:
         threading.Thread(target=arp_spoofer.run, daemon=True).start()
-        wait_start = time.time()
-        while _state.RUNNING and time.time() - wait_start < 15 and (not INV_MAC or not RTR_MAC):
+        wait_start = time.monotonic()
+        while _state.RUNNING and time.monotonic() - wait_start < 15 and (not INV_MAC or not RTR_MAC):
             time.sleep(1)
     else:
         INV_MAC = norm_mac(INVERTER_MAC_CFG)
