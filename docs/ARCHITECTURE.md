@@ -182,7 +182,7 @@ Nothing tests `CONTRIBUTING.md`, the per-device counts in `DOCS.md:164-172`, or 
 Status: live defect.
 Fix: have `health_logger` or the main loop check `sniffer.running` and either restart the sniffer or clear `RUNNING` so the container exits and Supervisor restarts it. The smoke test cannot catch this; its ready marker is the same log line (`scripts/smoke-test.sh:20`).
 
-**2. The `INVERTER_COUNT` scaling basis is unproven, and the docs state it as fact.**
+**2. The `INVERTER_COUNT` scaling basis is unproven.**
 `_scale_main_power` (`parsers.py:1172`) multiplies load, mains and generation power by `INVERTER_COUNT` (`:1316`, `:1387`, `:1581`), the factor also enters grid import (`:863`) and the legacy battery current (`:744`, `:768`), and all of it feeds five monotonic kWh counters (`:772-778`) that persist across restarts (`:1974` -> `core.py:140`). Whether the inverter's blocks carry per-unit or system figures is recorded as the top open question in `captures/README.md:64-66` and `captures/2026-08-21_2341_discharging.md:108-122`, yet `DOCS.md:209` says "per-unit figures" flatly and `siseli_bridge/CHANGELOG.md:259` calls the 11 kW nameplate confirmed. The proposed 24-hour `c_generation_energy_kwh` vs `pv_today_kwh` ratio (`CHANGELOG.md:237`) cannot discriminate, because both derive from the same device's blocks (`parsers.py:1572-1581`, `:1187-1188`). The shipped default `INVERTER_COUNT: 1` (`config.yaml:38`) is unaffected, and the night-time efficiency figure (89.6 %) leans the code's way.
 Status: **open question — still open.** The docs no longer state the basis as fact (2.6.19); the
 question itself is unresolved and only a rating plate or a clamp meter settles it.

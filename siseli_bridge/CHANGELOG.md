@@ -23,11 +23,6 @@ All notable changes to this project will be documented in this file.
   worst case composes as the 15 s ARP wait plus one payload lost to that join plus one
   full 600 s gap — the largest ever measured. The unavailable log now names whichever
   bound actually fired, rather than always printing the telemetry timeout.
-
-## [Unreleased]
-
-### Fixed
-
 - **Every Dependabot dependency PR failed CI by construction.** The runtime pins were
   written in both `pyproject.toml` and `siseli_bridge/requirements.txt`, and the base
   image in both the `Dockerfile` and `scripts/smoke-test.sh`, each pair held equal by a
