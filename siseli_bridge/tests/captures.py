@@ -71,6 +71,7 @@ CAPTURE_IDENTITY = {
 # anything scaled by INVERTER_COUNT lives in EXPECTED_TELEMETRY_SCALED below.
 EXPECTED_TELEMETRY = {
     "bat_v": 53.4,
+    "second_output_battery_capacity": 50,
     "bat_cap": 58,
     "bat_charge_current": 7.0,
     "dischg_current": 0.0,
@@ -291,9 +292,10 @@ SYNTH_WDRR_ABSURD_POWER = b"(232.7 49.9 280 170 65 40 +999999999 0 11000 11+0000
 
 # ---------------------------------------------------------------------------
 # NOT YET CAPTURED
-# The parser recognises 15 block keys. Device A above covers all of them except
-# none -- but only Device A's *configuration* is represented. Captures still
-# wanted: a 120 V unit (the 93VQ config decode no-ops unless the packed word ends
-# "230"), an inverter reporting a real BMS fault word (every capture so far reads
-# the all-clear 1001100000000000), and a single-inverter non-parallel install.
+# The parser recognises 15 block keys and Device A above covers every one of them,
+# but only in Device A's *configuration*. Captures still wanted: a 120 V unit (the
+# 93VQ config decode no-ops unless the packed word ends "230"), an inverter reporting
+# a real BMS fault word (every capture so far reads the all-clear 1001100000000000),
+# a single-inverter non-parallel install, and a second output capacity set to a single
+# digit (see the dHrK[16] note in parsers.py).
 # ---------------------------------------------------------------------------
