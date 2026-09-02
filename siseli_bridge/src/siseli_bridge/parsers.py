@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from . import state as _shared_state
-from .loggers import log, log_kv, json_log, log_payload_preview, log_error_always
+from .loggers import log, log_kv, json_log, log_payload_preview, log_error_always, hex_preview
 from .sensors import SENSORS
 from .config import (
     STATE_CACHE_FILE, STREAM_STALE_SECONDS, LOG_STREAM_EVENTS, MAX_STREAM_BUFFER,
@@ -125,6 +125,15 @@ KNOWN_BLOCK_NAMES: FrozenSet[str] = frozenset(
         "Yavb", "dHrK", "eo8w", "hR6Y", "noeP", "uxJp", "v09K",
     }
 )
+
+#: The frame terminator these vendors append. Bytes, not a literal, so no escape
+#: can be mangled by a generator script again.
+_FRAME_TAIL = bytes((0x0D, 0x0A))
+
+#: Width of the checksum a body may carry and still count as text. Two, because that
+#: is the width of a CRC16 -- the thing being excused -- not a tunable. Three would
+#: start excusing a real binary trailer.
+_CHECKSUM_TAIL_BYTES = 2
 
 #: One-shot guard so a foreign device is diagnosed once, not on every payload.
 UNSUPPORTED_PROTOCOL_LOGGED = False
@@ -917,6 +926,43 @@ class SolarParser:
         return crc
 
     @staticmethod
+    def _crc16_xmodem(data: bytes) -> int:
+        """CRC16-XMODEM: poly 0x1021, init 0x0000, transmitted big-endian.
+
+        The Voltronic/Axpert PI30 family computes it over the whole response
+        INCLUDING the leading "(" and excluding the trailing CR. Excluding the paren
+        matches nothing, so the scope is not a detail to tidy later.
+        """
+        crc = 0
+        for byte in data:
+            crc ^= byte << 8
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+        return crc
+
+    @staticmethod
+    def _is_printable(data: bytes) -> bool:
+        return all(0x20 <= byte <= 0x7E or byte in (0x0A, 0x0D, 0x09) for byte in data)
+
+    @staticmethod
+    def _body_shape(body: bytes) -> str:
+        """Classify one block body as ascii, ascii+binary_tail, or binary.
+
+        Per body, and per byte-run within it. The previous single all() over every
+        byte of every body meant one checksum byte anywhere forced the whole payload
+        to "binary" -- the word the docs called the strongest signal of a different
+        protocol family. Issue #32 is plain ASCII with a two-byte CRC and was told it
+        was binary.
+        """
+        if SolarParser._is_printable(body):
+            return "ascii"
+        core = body.rstrip(_FRAME_TAIL)
+        head = core[:-_CHECKSUM_TAIL_BYTES]
+        if len(head) >= 2 and SolarParser._is_printable(head):
+            return "ascii+binary_tail"
+        return "binary"
+
+    @staticmethod
     def _describe_foreign_blocks(blocks: Dict[str, bytes]) -> Dict[str, object]:
         """Say what a payload of unrecognised blocks actually looks like.
 
@@ -928,10 +974,13 @@ class SolarParser:
         way to tell a wrong device from a broken add-on.
         """
         bodies = list(blocks.values())
-        printable = all(
-            all(0x20 <= byte <= 0x7E or byte in (0x0A, 0x0D, 0x09) for byte in body)
-            for body in bodies
-        )
+        shapes = [SolarParser._body_shape(body) for body in bodies]
+        # Worst shape wins the headline, but every shape present is reported, because
+        # a mixed payload is itself the signal -- issue #30 sends Modbus frames and one
+        # Voltronic ACK.
+        for worst in ("binary", "ascii+binary_tail", "ascii"):
+            if worst in shapes:
+                break
 
         # Modbus RTU: address, function, byte count, data, CRC16 little-endian. The
         # CRC is what makes this a check rather than a shape guess -- a single false
@@ -948,16 +997,39 @@ class SolarParser:
             and SolarParser._crc16_modbus(body[:-2]) == int.from_bytes(body[-2:], "little")
         )
 
+        # Voltronic / Axpert PI30: "(" then the payload then CRC16-XMODEM big-endian,
+        # then CR. Same counted treatment and the same reason: issue #30's Modbus
+        # device emits exactly one valid Voltronic frame ("(ACK9 "), so any single
+        # match would mislabel it. That one frame is what sets the threshold below.
+        voltronic_ok = 0
+        for body in bodies:
+            core = body.rstrip(_FRAME_TAIL)
+            if (
+                len(core) > 3
+                and core[:1] == b"("
+                and SolarParser._crc16_xmodem(core[:-2]) == int.from_bytes(core[-2:], "big")
+            ):
+                voltronic_ok += 1
+
         described: Dict[str, object] = {
             "block_count": len(blocks),
             "recognised": len(set(blocks) & KNOWN_BLOCK_NAMES),
             "names": sorted(blocks.keys()),
-            "body": "ascii" if printable else "binary",
+            "body": worst,
         }
+        if len(set(shapes)) > 1:
+            described["body_shapes"] = ",".join(f"{s}={shapes.count(s)}" for s in sorted(set(shapes)))
         if crc_ok:
             described["modbus_crc_ok"] = f"{crc_ok}/{len(bodies)}"
-        if crc_ok >= 3 and crc_ok * 2 >= len(bodies):
+        if voltronic_ok:
+            described["voltronic_crc_ok"] = f"{voltronic_ok}/{len(bodies)}"
+
+        modbus_hint = crc_ok >= 3 and crc_ok * 2 >= len(bodies)
+        voltronic_hint = voltronic_ok >= 3 and voltronic_ok * 2 >= len(bodies)
+        if modbus_hint and not voltronic_hint:
             described["looks_like"] = "modbus_rtu"
+        elif voltronic_hint and not modbus_hint:
+            described["looks_like"] = "voltronic_pi30"
         return described
 
     @staticmethod
@@ -1926,7 +1998,11 @@ class SolarParser:
                         name=block_name,
                         text=raw_text,
                         tokens=raw_tokens,
-                        hex_preview=blocks[block_name][:64].hex(),
+                        # Full body, not [:64]. The cap silently cut issue #30's
+                        # r8BV mid-frame and both of issue #32's telemetry blocks --
+                        # exactly the data CONTRIBUTING.md asks reporters to send, and
+                        # a truncated body cannot be a BLOCK_* fixture.
+                        hex_preview=hex_preview(blocks[block_name], limit=4096),
                     )
 
             if not blocks:

@@ -234,6 +234,22 @@ class TestDocumentationSplit(unittest.TestCase):
         self.assertEqual(relative, [], f"relative links break on the Documentation tab: {relative}")
 
 
+class TestDiagnosticVocabularyIsDocumented(unittest.TestCase):
+    """The diagnostic's own words are the user's only handle on an unsupported device,
+    and 2.6.17 shipped a value the docs then contradicted: body="binary" was called the
+    strongest signal of a foreign protocol, which mis-triaged a plainly-textual device
+    in issue #32. Every shape the code can emit must be explained where the user reads."""
+
+    def test_every_body_shape_appears_in_the_docs(self):
+        docs = (ADDON / "DOCS.md").read_text(encoding="utf-8")
+        source = (ADDON / "src" / "siseli_bridge" / "parsers.py").read_text(encoding="utf-8")
+        shapes = set(re.findall(r'return "(ascii\+binary_tail|ascii|binary)"', source))
+        self.assertEqual(shapes, {"ascii", "ascii+binary_tail", "binary"})
+        for shape in sorted(shapes):
+            with self.subTest(shape=shape):
+                self.assertIn(f"`{shape}`", docs, f"DOCS.md does not explain body={shape}")
+
+
 class TestDocumentedCountsAreCurrent(unittest.TestCase):
     """Three counts in the README are derived from the sensor registry and were updated
     by hand. "Around 38 sensors read Unknown" was written when the registry held 38 such
