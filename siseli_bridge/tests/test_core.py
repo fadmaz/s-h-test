@@ -390,6 +390,20 @@ class TestAvailabilityWatchdog(_CoreTestCase):
         shared_state.LAST_TELEMETRY_TS = 1000.0
         self.assertFalse(core.telemetry_is_fresh(now=1000.0 + core.TELEMETRY_TIMEOUT_SEC + 1))
 
+    def test_the_unavailable_log_names_the_bound_that_actually_fired(self):
+        """Before any payload the startup grace governs, not the telemetry timeout.
+        Printing the wrong number is the silent-inconsistency shape this repo keeps
+        being bitten by."""
+        shared_state.LAST_TELEMETRY_TS = 0.0
+        shared_state.AVAILABILITY_ONLINE = True
+        with mock.patch.object(core, "PROCESS_START_TS", 0.0), mock.patch.object(
+            core, "publish_availability"
+        ), mock.patch("src.siseli_bridge.core.log") as logged:
+            core.availability_watchdog_tick(now=core.STARTUP_GRACE_SEC + 10)
+        said = " ".join(str(c.args[0]) for c in logged.call_args_list if c.args)
+        self.assertIn(str(core.STARTUP_GRACE_SEC), said)
+        self.assertIn("startup", said.lower())
+
     def test_the_startup_grace_expires_well_inside_the_telemetry_timeout(self):
         """The grace used to be the telemetry timeout itself, so a restart on an install
         whose inverter had gone quiet showed the restored cache as live for 1800 s. It is

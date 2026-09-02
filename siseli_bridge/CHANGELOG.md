@@ -16,10 +16,13 @@ All notable changes to this project will be documented in this file.
 - **The startup grace no longer presents a restored cache as live data for half an hour.**
   When no payload had been decoded yet, availability was granted for the full
   `TELEMETRY_TIMEOUT_SEC` — 1800 s by default, and 3600 s reachable. It now has its own
-  bound, `STARTUP_GRACE_SEC`, defaulting to 600 s: the largest gap ever measured between
-  decoded payloads, so a device reporting normally still produces its first payload inside
-  it. The trade is explicit and bounded at one unavailable-to-available pair per restart
-  for an install whose inverter takes longer than that to speak.
+  bound, `STARTUP_GRACE_SEC`, defaulting to **1200 s**. That bounds process start to first
+  *decoded* payload, which is structurally larger than the gap between payloads: the
+  inverter's connection to the cloud is long-lived, so a restarted bridge always joins
+  mid-stream and discards until a frame boundary, costing the payload in progress. The
+  worst case composes as the 15 s ARP wait plus one payload lost to that join plus one
+  full 600 s gap — the largest ever measured. The unavailable log now names whichever
+  bound actually fired, rather than always printing the telemetry timeout.
 
 ## [Unreleased]
 

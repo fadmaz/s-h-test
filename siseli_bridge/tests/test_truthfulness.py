@@ -11,6 +11,7 @@ Fixtures are real captures from two devices -- see tests/captures.py.
 
 import inspect
 import os
+import pathlib
 import re
 import tempfile
 import unittest
@@ -618,6 +619,30 @@ class TestEnergyIsImmuneToAClockStep(unittest.TestCase):
         ):
             SolarParser._apply_energy_dashboard_calculations({"c_load_w": 100})
         self.assertTrue(seen, "the energy path no longer consults the monotonic clock")
+
+
+class TestNoModuleMeasuresADurationOnTheWallClock(unittest.TestCase):
+    """A source pin, because a partial migration is invisible in behaviour until a
+    clock steps -- and the whole suite would still pass. Moving record_telemetry to
+    monotonic while telemetry_is_fresh stayed on the wall clock would make now - last
+    about 1.7e9 and read every entity Unavailable forever."""
+
+    SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "siseli_bridge"
+
+    def test_no_runtime_module_calls_time_time(self):
+        for name in ("core.py", "parsers.py", "state.py", "mqtt.py"):
+            with self.subTest(module=name):
+                text = (self.SRC / name).read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "time.time()",
+                    text,
+                    f"{name} measures a duration on a clock that can step; use time.monotonic()",
+                )
+
+    def test_the_human_readable_timestamp_is_still_a_wall_clock(self):
+        """The one correct wall-clock use: the time a person reads in the log."""
+        text = (self.SRC / "parsers.py").read_text(encoding="utf-8")
+        self.assertIn("datetime.now().strftime", text)
 
 
 class TestPublishThrottle(unittest.TestCase):

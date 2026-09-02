@@ -405,6 +405,13 @@ def telemetry_is_fresh(now: Optional[float] = None) -> bool:
     Deliberately keyed on parsed telemetry rather than LAST_PACKET_TS, which is set
     for any packet matching the capture filter -- bare ACKs included -- and so stays
     fresh long after the cloud stream has stopped carrying data.
+
+    Measured on time.monotonic(), which on Linux excludes time spent suspended. After a
+    host suspend the watchdog therefore sees little elapsed and keeps the entities
+    available until the timeout passes in running time. That is accepted rather than
+    overlooked: Home Assistant is suspended alongside the bridge, so nobody is being
+    shown a stale value while it lasts, and a second clock just for this branch would
+    reintroduce the two-writers-one-value shape state.py exists to record.
     """
     now = now if now is not None else time.monotonic()
     timeout = effective_telemetry_timeout()
@@ -440,7 +447,16 @@ def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
     log(
         "[HEALTH] Telemetry resumed; sensors available again"
         if fresh
-        else f"[HEALTH] No decoded telemetry for {int(effective_telemetry_timeout())}s; marking sensors unavailable",
+        # Name the bound that actually fired. Before any payload has been decoded the
+        # startup grace governs, not the telemetry timeout, and printing the wrong one
+        # is the silent-inconsistency shape this project keeps getting bitten by.
+        else (
+            f"[HEALTH] No decoded telemetry for {int(effective_telemetry_timeout())}s; "
+            "marking sensors unavailable"
+            if _state.LAST_TELEMETRY_TS
+            else f"[HEALTH] No telemetry decoded within {STARTUP_GRACE_SEC}s of startup; "
+            "marking sensors unavailable"
+        ),
         level="info" if fresh else "warning",
     )
     return fresh

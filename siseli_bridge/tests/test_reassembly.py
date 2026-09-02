@@ -115,16 +115,22 @@ class TestMissingSegmentRecovery(_FlowTestCase):
         )
 
     def test_a_gap_times_out(self):
+        """Every call runs on the same fake clock, including the one that creates the
+        flow. Seeding the flow from the real monotonic clock and then patching made the
+        result depend on the host's uptime: a developer box days into an uptime saw a
+        backward jump and passed, a freshly booted CI runner saw a 9700 s forward jump,
+        tripped the stale-flow reset, and cleared the gap under test."""
         packet = _publish()
-        append_stream_data(FLOW, 1000, packet)
         gap_seq = 1000 + len(packet) * 2
+        clock = {"now": 10_000.0}
 
-        with mock.patch.object(parser_module.time, "monotonic", return_value=10_000.0):
+        with mock.patch.object(parser_module.time, "monotonic", side_effect=lambda: clock["now"]):
+            append_stream_data(FLOW, 1000, packet)
+
             append_stream_data(FLOW, gap_seq, packet)
             self.assertIsNotNone(FLOW_STATES[FLOW].gap_since)
 
-        later = 10_000.0 + parser_module.STREAM_GAP_TIMEOUT_SEC + 1
-        with mock.patch.object(parser_module.time, "monotonic", return_value=later):
+            clock["now"] = 10_000.0 + parser_module.STREAM_GAP_TIMEOUT_SEC + 1
             append_stream_data(FLOW, gap_seq + len(packet), packet)
 
         self.assertIsNone(FLOW_STATES[FLOW].gap_since, "the gap must be abandoned")

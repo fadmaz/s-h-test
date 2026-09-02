@@ -25,7 +25,8 @@ STATE_LOCK = threading.RLock()
 #: value, so core.shutdown() rebound only its own copy and mqtt's stayed True forever.
 RUNNING: bool = True
 
-#: Wall-clock time of the last *successfully parsed telemetry payload*. This is the
+#: time.monotonic() reading at the last *successfully parsed telemetry payload*. It is
+#: meaningless across a process boundary and must never be persisted. This is the
 #: only trustworthy liveness signal: core's LAST_PACKET_TS is set for any packet
 #: matching the capture filter, bare ACKs included, so it stays fresh long after the
 #: cloud stream has stopped carrying data.

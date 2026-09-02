@@ -137,7 +137,8 @@ _CHECKSUM_TAIL_BYTES = 2
 
 #: One-shot guard so a foreign device is diagnosed once, not on every payload.
 UNSUPPORTED_PROTOCOL_LOGGED = False
-#: Integration clock per energy domain. A dict rather than one global per domain, so
+#: Integration clock per energy domain, holding time.monotonic() readings -- which are
+#: meaningless across a process boundary and must never be persisted. A dict rather than one global per domain, so
 #: adding a calculated energy counter does not need a new module-level name -- and so
 #: the test isolation helper has one thing to save instead of a growing list.
 LAST_ENERGY_TS: Dict[str, float] = {}
@@ -721,8 +722,10 @@ class SolarParser:
     def _energy_max_dt() -> float:
         """Largest interval the integrator will credit in one step.
 
-        Guards against a clock jump or a suspended process crediting a fabricated
-        block of kWh. It must sit *above* normal operation: derived from
+        Guards against a genuinely long real gap -- a wedged stream, or a process that
+        stopped being scheduled -- crediting a fabricated block of kWh. A clock jump is
+        no longer among them: since 2.6.19 the interval is measured on time.monotonic()
+        and a wall-clock step cannot reach this function. It must sit *above* normal operation: derived from
         UPDATE_INTERVAL_SEC it evaluated to 60 s against a measured 300 s cadence, so
         it truncated every interval and the counters accrued a fifth of the real
         energy. Floored on observed cadence for the same reason the availability
