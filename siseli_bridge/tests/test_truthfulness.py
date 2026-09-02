@@ -645,6 +645,64 @@ class TestNoModuleMeasuresADurationOnTheWallClock(unittest.TestCase):
         self.assertIn("datetime.now().strftime", text)
 
 
+class TestBatteryCurrentGuard(unittest.TestCase):
+    """The guard used to reject anything over 300 A, silently.
+
+    300 is below what this hardware declares for itself -- the reference device reports
+    bms_charge_current_limit_a of 390 -- so a real reading between the two was thrown
+    away. Silently is the worse half: the key simply went absent, _battery_current then
+    picked whichever source survived without the [ENERGY SOURCE DISAGREEMENT] warning
+    (which needs both present), and if both were dropped the powers read 0 and
+    battery_status reported Idle. A high-current moment presented as an idle battery.
+    """
+
+    def setUp(self):
+        self._ctx = isolated_state()
+        self._ctx.__enter__()
+        self.addCleanup(lambda: self._ctx.__exit__(None, None, None))
+        parser_module.BATTERY_CURRENT_REJECTED_LOGGED = False
+
+    def test_a_current_the_device_itself_allows_is_kept(self):
+        """390 A is Yavb[4] on the reference device -- its own declared charge limit.
+        Rejected by the old 300 A bound."""
+        for amps in (301.0, 350.0, 390.0, 600.0):
+            with self.subTest(amps=amps):
+                self.assertEqual(
+                    SolarParser._plausible_current(amps, "bms_charging_current_a"), amps
+                )
+
+    def test_an_impossible_current_is_still_rejected(self):
+        for amps in (-1.0, 9999.0, 100000.0):
+            with self.subTest(amps=amps):
+                parser_module.BATTERY_CURRENT_REJECTED_LOGGED = False
+                self.assertIsNone(SolarParser._plausible_current(amps, "field"))
+
+    def test_the_synthetic_absurd_block_is_still_rejected(self):
+        """The only existing test of these guards. 9999 A must not become a reading."""
+        state = SolarParser._try_ascii_schema({"Yavb": captures.SYNTH_YAVB_ABSURD_CURRENT})
+        self.assertNotIn("bms_charging_current_a", state)
+
+    def test_a_rejection_is_reported_once_not_per_payload(self):
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            for _ in range(4):
+                SolarParser._plausible_current(9999.0, "bms_charging_current_a")
+        tags = [c.args[0] for c in logged.call_args_list if c.args]
+        self.assertEqual(tags.count("[BATTERY CURRENT REJECTED]"), 1)
+
+    def test_the_rejection_names_the_field_and_the_bound(self):
+        with mock.patch("src.siseli_bridge.parsers.log_kv") as logged:
+            SolarParser._plausible_current(9999.0, "bms_discharge_current_a")
+        call = next(c for c in logged.call_args_list if c.args and c.args[0] == "[BATTERY CURRENT REJECTED]")
+        self.assertEqual(call.kwargs["level"], "warning")
+        self.assertEqual(call.kwargs["field"], "bms_discharge_current_a")
+        self.assertEqual(call.kwargs["max_a"], parser_module.BATTERY_CURRENT_MAX_A)
+
+    def test_the_bound_clears_the_limit_the_hardware_declares(self):
+        """Pins the reason for the number rather than the number. 390 A is the highest
+        limit any capture has shown; a bound at or below it rejects real readings."""
+        self.assertGreater(parser_module.BATTERY_CURRENT_MAX_A, 390)
+
+
 class TestPublishThrottle(unittest.TestCase):
     """UPDATE_INTERVAL_SEC never suppressed a publish: the gate was
     `changed or interval elapsed`, and something always changed."""

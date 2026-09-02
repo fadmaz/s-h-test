@@ -26,7 +26,7 @@ from .config import *
 from .loggers import log, log_kv, log_payload_preview
 from .sensors import SENSORS, UNDECODED_SENSOR_KEYS
 from . import state as _state
-from .mqtt import client, publish_availability, start_mqtt
+from .mqtt import broker_is_connected, client, publish_availability, start_mqtt
 from .parsers import (
     SEEN_MQTT_TOPICS,
     SolarParser,
@@ -633,14 +633,22 @@ def health_logger() -> None:
 
         age = time.monotonic() - LAST_PACKET_TS if LAST_PACKET_TS else -1
         if age < 0:
-            log("[HEALTH] No packets captured yet", level="info")
+            log(
+                f"[HEALTH] No packets captured yet; broker="
+                f"{'up' if broker_is_connected() else 'DOWN'}",
+                level="info",
+            )
         else:
             inv_list = sorted(x for x in KNOWN_INVERTER_MACS if x)
             rtr_list = sorted(x for x in KNOWN_ROUTER_MACS if x)
             dropped = {k: v for k, v in sorted(DROPPED_NON_TARGET.items()) if v > 0}
             extra = f"; dropped_non_broker={dropped}" if dropped else ""
             log(
-                f"[HEALTH] Last packet seen {int(age)}s ago; inverter_macs={inv_list}; "
+                # broker= included because a down broker used to be invisible here:
+                # capture keeps working, this line keeps printing, and nothing reaches
+                # Home Assistant.
+                f"[HEALTH] broker={'up' if broker_is_connected() else 'DOWN'}; "
+                f"Last packet seen {int(age)}s ago; inverter_macs={inv_list}; "
                 f"router_macs={rtr_list}{extra}",
                 level="info",
             )

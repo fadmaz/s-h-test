@@ -330,3 +330,61 @@ class TestAvailabilityAndIdentity(_MqttTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBrokerReachabilityIsVisible(unittest.TestCase):
+    """An unreachable broker produced no output at all, while the parser went on
+    logging "Published to HA" for every payload.
+
+    connect_async plus loop_start retries forever in paho's network thread, and
+    on_connect fires only on a CONNACK -- so its rc != 0 branch covers a broker that
+    answers and refuses (bad credentials) and never one that is not there. Meanwhile a
+    QoS 0 publish on a disconnected client returns MQTT_ERR_NO_CONN and is dropped
+    without raising, and every call site discarded that return.
+    """
+
+    def setUp(self):
+        mqtt_mod.CONNECT_FAILURE_LOGGED = False
+        self.addCleanup(setattr, mqtt_mod, "CONNECT_FAILURE_LOGGED", False)
+
+    def test_a_failed_publish_is_reported_to_the_caller(self):
+        fake = FakeMqttClient(publish_rc=4)  # MQTT_ERR_NO_CONN
+        with mock.patch.object(mqtt_mod, "client", fake):
+            self.assertFalse(mqtt_mod.publish_grouped_state({"bat_v": 53.4}))
+
+    def test_a_good_publish_reports_success(self):
+        fake = FakeMqttClient()
+        with mock.patch.object(mqtt_mod, "client", fake):
+            self.assertTrue(mqtt_mod.publish_grouped_state({"bat_v": 53.4}))
+
+    def test_broker_state_is_readable(self):
+        fake = FakeMqttClient()
+        with mock.patch.object(mqtt_mod, "client", fake):
+            self.assertTrue(mqtt_mod.broker_is_connected())
+            fake.connected = False
+            self.assertFalse(mqtt_mod.broker_is_connected())
+
+    def test_an_unreachable_broker_says_so_once(self):
+        """paho retries every few seconds; one line per outage, not per attempt."""
+        with mock.patch("src.siseli_bridge.mqtt.log_error_always") as logged:
+            for _ in range(5):
+                mqtt_mod.on_connect_fail()
+        self.assertEqual(len(logged.call_args_list), 1)
+        said = str(logged.call_args_list[0].args[0])
+        self.assertIn("Cannot reach the broker", said)
+
+    def test_a_later_outage_is_reported_again(self):
+        with mock.patch("src.siseli_bridge.mqtt.log_error_always"):
+            mqtt_mod.on_connect_fail()
+        self.assertTrue(mqtt_mod.CONNECT_FAILURE_LOGGED)
+        with mock.patch.object(mqtt_mod, "client", FakeMqttClient()), mock.patch.object(
+            mqtt_mod, "publish_discovery"
+        ), mock.patch.object(mqtt_mod, "publish_availability"):
+            mqtt_mod.on_connect(None, None, None, 0)
+        self.assertFalse(
+            mqtt_mod.CONNECT_FAILURE_LOGGED, "a successful connect must re-arm the report"
+        )
+
+    def test_the_callback_is_registered_on_the_client(self):
+        """The defect was that nothing registered it, so nothing could report."""
+        self.assertIs(mqtt_mod.client.on_connect_fail, mqtt_mod.on_connect_fail)

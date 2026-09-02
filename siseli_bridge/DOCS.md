@@ -332,6 +332,19 @@ you have pinned one, and see [Network setup](#network-setup).
 With `AUTO_INTERCEPT` off the message says the inverter's own path is unaffected, because
 in that mode the bridge only listens — nothing it does can interrupt your inverter.
 
+### The log says "Decoded but NOT published"
+
+```
+[12:34:56] Decoded but NOT published -- broker unreachable clean_value_count=131 ...
+```
+
+The inverter's data was read correctly and the MQTT broker did not accept it, so nothing
+reached Home Assistant. That is a broker problem, not an inverter one — see
+[No entities appear](#no-entities-appear) and check `broker=` on the health line.
+
+`Decoded, publish throttled` is different and normal: the reading was fine and the
+publish was skipped because nothing had changed since the last one.
+
 ### Every sensor reads Unknown
 
 Not a few sensors — *all* of them, right from the first start. That means the bridge is
@@ -381,12 +394,16 @@ work, but it starts with a capture.
 
 ### No entities appear
 
-- Check the log for `[HA MQTT] Connected` and `[HA MQTT] Discovery published`. If the
-  connection fails, the MQTT credentials are wrong.
+- Check the log for `[HA MQTT] Connected` and `[HA MQTT] Discovery published`. Two
+  different failures look different: `[HA MQTT] Cannot reach the broker at HOST:PORT`
+  means the broker is not answering at all — check `MQTT_HOST`, `MQTT_PORT`, and that
+  the broker is running. A connection that is refused rather than unanswered means the
+  credentials are wrong.
 - Check for `[ARP] Interception ACTIVE`. If it never appears, the MAC addresses could not
   be resolved — set `INVERTER_MAC` and `ROUTER_MAC` manually.
-- The health line every 30 seconds reports which MACs the bridge is seeing:
-  `[HEALTH] Last packet seen 12s ago; inverter_macs=[...]`. If `inverter_macs` is empty,
+- The health line every 30 seconds reports the broker and which MACs the bridge is
+  seeing: `[HEALTH] broker=up; Last packet seen 12s ago; inverter_macs=[...]`.
+  `broker=DOWN` means nothing is reaching Home Assistant however healthy the rest looks. If `inverter_macs` is empty,
   no inverter traffic is reaching the capture — check `INVERTER_IP`, or pin `SNIFF_IFACE`.
 
 ### Entities go unavailable and come back

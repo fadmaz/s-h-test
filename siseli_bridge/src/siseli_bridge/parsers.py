@@ -108,6 +108,21 @@ ENERGY_DT_CLAMP_LOGGED = False
 #: counter -- every neighbouring field is range-checked -- and _accumulate_kwh is
 #: monotonic, so one malformed token latches the Energy Dashboard permanently.
 MAINS_POWER_MAX_W = 100000
+
+#: Plausibility bound on a battery current, in amps. The guards it replaces read
+#: 0..300, which is BELOW what this hardware declares for itself: the reference device
+#: reports bms_charge_current_limit_a of 390 A, so a real reading between 300 and 390
+#: was being discarded -- silently, which is the worse half.
+#:
+#: 1000 A is set by the largest current the hardware can plausibly reach, not picked.
+#: The highest limit any capture has shown the BMS declare is 390 A, and the 11 kW
+#: nameplate at a ~48 V bank implies about 229 A. 1000 leaves headroom over both for
+#: banks larger than the one seen, while still rejecting a token that is obviously
+#: garbage -- the 9999 A synthetic block remains rejected.
+BATTERY_CURRENT_MAX_A = 1000
+
+#: One-shot guard so a rejected current is reported once, not per payload.
+BATTERY_CURRENT_REJECTED_LOGGED = False
 GRID_VALUE_REJECTED_LOGGED = False
 
 #: Every block name _try_ascii_schema knows how to decode.
@@ -920,6 +935,34 @@ class SolarParser:
             return None
 
     @staticmethod
+    def _plausible_current(value, field: str):
+        """Return the current if it can be real, else None -- and say so, once.
+
+        These bounds used to be four inline comparisons against 300 with no report.
+        A rejected reading simply left its key absent, and the consequences ran on from
+        there: _battery_current then picked whichever source survived WITHOUT the
+        [ENERGY SOURCE DISAGREEMENT] warning, which only fires when both are present,
+        and if both were dropped the charge and discharge power both read 0 and
+        _derive_battery_status reported Idle. A high-current moment presented as an
+        idle battery contributing no energy, with nothing in the log to say why.
+        """
+        global BATTERY_CURRENT_REJECTED_LOGGED
+        if value is None:
+            return None
+        if 0 <= value <= BATTERY_CURRENT_MAX_A:
+            return value
+        if not BATTERY_CURRENT_REJECTED_LOGGED:
+            BATTERY_CURRENT_REJECTED_LOGGED = True
+            log_kv(
+                "[BATTERY CURRENT REJECTED]",
+                level="warning",
+                field=field,
+                parsed=value,
+                max_a=BATTERY_CURRENT_MAX_A,
+            )
+        return None
+
+    @staticmethod
     def _crc16_modbus(data: bytes) -> int:
         crc = 0xFFFF
         for byte in data:
@@ -1540,13 +1583,17 @@ class SolarParser:
                 state["bat_cap"] = bat_cap
 
         if len(vals) >= 4:
-            charge_a = SolarParser._to_float_strict(vals[3])
-            if charge_a is not None and 0 <= charge_a <= 300:
+            charge_a = SolarParser._plausible_current(
+                SolarParser._to_float_strict(vals[3]), "bat_charge_current"
+            )
+            if charge_a is not None:
                 state["bat_charge_current"] = round(charge_a, 2)
 
         if len(vals) >= 5:
-            dischg_a = SolarParser._to_float_strict(vals[4])
-            if dischg_a is not None and 0 <= dischg_a <= 300:
+            dischg_a = SolarParser._plausible_current(
+                SolarParser._to_float_strict(vals[4]), "dischg_current"
+            )
+            if dischg_a is not None:
                 state["dischg_current"] = round(dischg_a, 2)
 
         # Tokens 5 and 6 previously carried a pair of guesses: "if this position is not
@@ -1850,11 +1897,15 @@ class SolarParser:
             if soc is not None:
                 state["bms_current_soc"] = int(round(soc))
         if len(vals) >= 8:
-            charge_or_temp = SolarParser._to_float(vals[6])
-            discharge = SolarParser._to_float(vals[7])
-            if charge_or_temp is not None and 0 <= charge_or_temp <= 300:
+            charge_or_temp = SolarParser._plausible_current(
+                SolarParser._to_float(vals[6]), "bms_charging_current_a"
+            )
+            discharge = SolarParser._plausible_current(
+                SolarParser._to_float(vals[7]), "bms_discharge_current_a"
+            )
+            if charge_or_temp is not None:
                 state["bms_charging_current_a"] = round(charge_or_temp, 1)
-            if discharge is not None and 0 <= discharge <= 300:
+            if discharge is not None:
                 state["bms_discharge_current_a"] = round(discharge, 1)
         if len(vals) >= 9:
             state["yavb_code_raw"] = vals[8]
@@ -2092,13 +2143,23 @@ class SolarParser:
                     # anything and the option did nothing at all.
                     due = PENDING_PUBLISH and elapsed >= UPDATE_INTERVAL_SEC
 
+                    delivered = None
                     if due:
-                        publish_grouped_state(snapshot)
+                        delivered = publish_grouped_state(snapshot)
                         LAST_PUBLISH_TS = now
                         PENDING_PUBLISH = False
 
+                # Say what actually happened. This line read "Published to HA" whether
+                # or not anything was published: it sits outside the throttle gate, and
+                # a QoS 0 publish to a dead broker is dropped without raising, so the
+                # one message a user checks was the one that could not be trusted.
+                outcome = (
+                    "Published to HA"
+                    if delivered
+                    else ("Decoded, publish throttled" if delivered is None else "Decoded but NOT published -- broker unreachable")
+                )
                 log_kv(
-                    f"[{datetime.now().strftime('%H:%M:%S')}] Published to HA",
+                    f"[{datetime.now().strftime('%H:%M:%S')}] {outcome}",
                     level="info",
                     topic=source_topic,
                     clean_value_count=len(clean_state),
