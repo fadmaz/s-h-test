@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 import warnings
@@ -40,7 +41,39 @@ from .parsers import (
 from .version import __version__ as VERSION
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+#: Consecutive capture restarts before the bridge gives up and stops. Consecutive, so a
+#: rare transient is forgiven while a fault that recurs on the next 10 s tick is not.
+CAPTURE_RESTART_LIMIT = 3
+CAPTURE_FAILURES = 0
+
+
+class _LastScapyWarning(logging.Handler):
+    """Keeps the most recent scapy warning so a dead capture thread can say why.
+
+    scapy handles an exception escaping the sniff callback by closing the capture
+    socket and emitting a warning, then returning normally -- so AsyncSniffer.exception
+    is None and that warning is the only account of the cause. Muting scapy.runtime
+    entirely, which this module used to do, threw it away.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.last: Optional[str] = None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.last = record.getMessage()
+        except Exception:
+            pass
+
+
+SCAPY_WARNINGS = _LastScapyWarning()
+_scapy_runtime = logging.getLogger("scapy.runtime")
+# WARNING rather than ERROR so the handler above sees the message; the logger has no
+# other handler of its own, so nothing extra reaches the add-on log.
+_scapy_runtime.setLevel(logging.WARNING)
+_scapy_runtime.addHandler(SCAPY_WARNINGS)
+_scapy_runtime.propagate = False
 
 def norm_mac(mac: Optional[str]) -> Optional[str]:
     if not mac:
@@ -463,20 +496,18 @@ def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
 
 
 def capture_thread_is_dead() -> bool:
-    """True once the scapy capture thread has ended while the bridge still thinks it
-    is running.
+    """True once the scapy capture thread has ended while the bridge still runs.
 
-    Read from the thread object rather than from AsyncSniffer.running or .exception,
-    because neither is reliable for this. scapy wraps the sniff loop in a try/except
-    that stores an exception on the instance, so .exception is None whenever _run
-    simply returns -- which is what a closed capture socket produces -- and .running is
-    cleared on that path too, indistinguishably from a deliberate stop. Thread liveness
-    covers both endings and needs no assumption about which one happened.
+    Read from the thread object rather than AsyncSniffer.running or .exception, because
+    neither is reliable here. scapy wraps the sniff loop in a try/except that stores an
+    exception on the instance, so .exception is None whenever _run simply returns --
+    which is what a closed capture socket produces -- and .running is cleared on that
+    path too, indistinguishably from a deliberate stop. Thread liveness covers both
+    endings without assuming which happened.
 
-    Nothing noticed this before. The ARP spoofer poisons on _state.RUNNING alone, and
-    forwarding lives inside packet_callback, so a dead capture thread left both peers
-    pointed at a bridge that no longer forwards: the inverter lost its route to the
-    cloud entirely, and the only symptom was sensors going stale half an hour later.
+    Both None checks are real startup windows, not padding: health_logger is started
+    before the sniffer is constructed, and AsyncSniffer.__init__ leaves .thread None
+    until start() builds it.
     """
     if sniffer is None:
         return False
@@ -486,26 +517,84 @@ def capture_thread_is_dead() -> bool:
     return not thread.is_alive()
 
 
-def check_capture_thread() -> bool:
-    """Stop the bridge if the capture thread has died. True when it acted.
+def build_sniffer() -> AsyncSniffer:
+    """The capture configuration, in one place so a restart cannot drift from a start."""
+    kwargs = {"filter": f"ip host {INVERTER_IP}", "prn": packet_callback, "store": False}
+    if SNIFF_IFACE:
+        kwargs["iface"] = SNIFF_IFACE
+    return AsyncSniffer(**kwargs)
 
-    Shutting down is the correct response rather than a restart in place. shutdown()
-    restores both ARP caches, which ends the blackhole immediately -- that is the
-    damage. A silent in-process retry would leave the peers poisoned while it tried,
-    and a persistent fault would loop invisibly. Exiting is loud, and with Supervisor's
-    Watchdog enabled the add-on comes straight back.
+
+def restart_capture() -> bool:
+    """Replace the dead sniffer with a fresh one. True if the new thread is alive.
+
+    A new instance rather than start() on the old one: after the socket-setup failure
+    path scapy leaves .running stale-True, and .exception/.results hold the previous
+    run's values.
     """
-    if not _state.RUNNING or not capture_thread_is_dead():
+    global sniffer
+    try:
+        sniffer = build_sniffer()
+        sniffer.start()
+        return not capture_thread_is_dead()
+    except Exception as exc:
+        log(f"[HEALTH] Could not restart packet capture: {exc}", level="error")
         return False
 
-    reason = getattr(sniffer, "exception", None)
+
+def check_capture_thread() -> bool:
+    """Watch the capture thread and act when it dies. True when it acted.
+
+    The capture thread ending is the worst state this add-on can be in. The ARP spoofer
+    poisons on RUNNING alone and forwarding lives inside packet_callback, so a dead
+    thread leaves the inverter redirected at a bridge that no longer forwards: its route
+    to the vendor cloud is gone, not degraded. Nothing noticed before, and the first
+    symptom was sensors going stale up to half an hour later, which reads exactly like a
+    quiet inverter.
+
+    Restarting in place rather than stopping, because stopping cannot be relied on to
+    recover: config.yaml declares no watchdog, so whether the add-on comes back is a
+    toggle this code cannot enforce, and Supervisor caps its restart attempts anyway. A
+    fresh sniffer costs milliseconds, so the outage is the detection latency either way,
+    and it needs nothing from the user. Persistent faults still end loudly.
+    """
+    global CAPTURE_FAILURES
+
+    if not _state.RUNNING or _state.STOP_REQUESTED:
+        return False
+    if not capture_thread_is_dead():
+        CAPTURE_FAILURES = 0
+        return False
+
+    CAPTURE_FAILURES += 1
+    cause = getattr(sniffer, "exception", None) or SCAPY_WARNINGS.last or "not reported"
+    # In passive mode the bridge never poisoned anything, so the inverter's own path to
+    # the cloud is untouched and saying otherwise would send the reader to their router.
+    impact = (
+        "the inverter is ARP-poisoned toward a bridge that cannot forward"
+        if AUTO_INTERCEPT
+        else "no telemetry can be decoded; the inverter's own path is unaffected"
+    )
     log(
-        "[HEALTH] Capture thread has died; the inverter is still ARP-poisoned toward a "
-        "bridge that cannot forward. Restoring ARP and stopping so Supervisor can "
-        f"restart the add-on. cause={reason!r}",
+        f"[HEALTH] Packet capture stopped ({CAPTURE_FAILURES}/{CAPTURE_RESTART_LIMIT}); "
+        f"{impact}. cause={cause}",
         level="error",
     )
-    shutdown()
+
+    if CAPTURE_FAILURES < CAPTURE_RESTART_LIMIT and restart_capture():
+        log("[HEALTH] Packet capture restarted", level="warning")
+        return True
+
+    log(
+        "[HEALTH] Packet capture will not stay up; restoring ARP and stopping so the "
+        "add-on is not left redirecting traffic it cannot forward",
+        level="error",
+    )
+    # Hand the stop to the main thread. Calling shutdown() here would set RUNNING False,
+    # then spend a second in restore_arp on a daemon thread that the interpreter kills
+    # as soon as main's own loop notices and falls through -- truncating the one action
+    # that ends the blackhole.
+    _state.STOP_REQUESTED = True
     return True
 
 
@@ -517,9 +606,10 @@ def health_logger() -> None:
         time.sleep(10)
         try:
             # Before availability: a dead capture thread is the cause of the staleness
-            # the watchdog would otherwise report as a quiet inverter.
-            if check_capture_thread():
-                return
+            # the watchdog would otherwise misreport as a quiet inverter. No early
+            # return -- a successful restart should leave the loop running, and a
+            # give-up sets STOP_REQUESTED, which this call then ignores on later ticks.
+            check_capture_thread()
         except Exception as exc:
             log(f"[HEALTH ERROR] {exc}", level="error")
 
@@ -674,22 +764,21 @@ if __name__ == "__main__":
 
     threading.Thread(target=health_logger, daemon=True).start()
 
-    sniff_kwargs = {
-        "filter": f"ip host {INVERTER_IP}",
-        "prn": packet_callback,
-        "store": False,
-    }
-    if SNIFF_IFACE:
-        sniff_kwargs["iface"] = SNIFF_IFACE
-
-    sniffer = AsyncSniffer(**sniff_kwargs)
+    sniffer = build_sniffer()
     sniffer.start()
     log("[Bridge] Sniffer started", level="info")
 
     try:
-        while _state.RUNNING:
+        while _state.RUNNING and not _state.STOP_REQUESTED:
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
+        # On the main thread, with RUNNING still set, so restore_arp gets its full
+        # second instead of being killed with the daemon threads.
         shutdown()
+
+    if _state.STOP_REQUESTED:
+        # Non-zero, because exit 0 is what a user-requested stop looks like and is the
+        # least likely status to prompt a supervisor to restart anything.
+        sys.exit(1)

@@ -25,6 +25,15 @@ STATE_LOCK = threading.RLock()
 #: value, so core.shutdown() rebound only its own copy and mqtt's stayed True forever.
 RUNNING: bool = True
 
+#: Set by a background thread that wants the bridge to stop. It is NOT the same as
+#: clearing RUNNING, and the difference is load-bearing: shutdown() returns early when
+#: RUNNING is already False, so a helper thread that cleared it would neuter the very
+#: teardown it was asking for. Worse, shutdown() must run on the MAIN thread -- it
+#: spends a full second restoring ARP, and a daemon thread doing that is killed
+#: mid-restore the moment main falls off the end of the module. The main loop watches
+#: this flag and lets its own `finally: shutdown()` do the work.
+STOP_REQUESTED: bool = False
+
 #: time.monotonic() reading at the last *successfully parsed telemetry payload*. It is
 #: meaningless across a process boundary and must never be persisted. This is the
 #: only trustworthy liveness signal: core's LAST_PACKET_TS is set for any packet

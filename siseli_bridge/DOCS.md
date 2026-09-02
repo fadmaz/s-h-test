@@ -299,25 +299,38 @@ Assistant host yourself. This works only if all three hold:
 
 ## Troubleshooting
 
-### The add-on stopped itself, saying the capture thread died
+### The log says packet capture stopped
 
 ```
-[HEALTH] Capture thread has died; the inverter is still ARP-poisoned toward a bridge
-that cannot forward. Restoring ARP and stopping so Supervisor can restart the add-on.
+[HEALTH] Packet capture stopped (1/3); the inverter is ARP-poisoned toward a bridge
+that cannot forward. cause=...
+[HEALTH] Packet capture restarted
 ```
 
-The packet capture ended while the add-on was still redirecting your inverter's traffic
-through it. Left alone that is the worst state the bridge can be in — your inverter would
-keep sending to a bridge that no longer forwards, losing its connection to the vendor
-cloud entirely, and the only sign would be sensors going stale much later.
+The packet capture ended and the add-on started it again. That pair of lines means it
+recovered on its own; the gap in readings is at most a few seconds. It is worth knowing
+about but needs nothing from you.
 
-So the add-on undoes the redirection and stops, which is why **Watchdog** matters: with it
-enabled Supervisor restarts the add-on immediately and the gap is seconds. With it
-disabled the add-on stays stopped until you start it yourself.
+The `cause=` value is the underlying error where one was reported. Capture ending without
+any error is normal for a closed socket, in which case it reads `not reported`.
 
-If it recurs, the `cause=` value in that line is the underlying error. A capture that dies
-repeatedly usually means the interface went away — check `SNIFF_IFACE` if you have pinned
-one, and see [Network setup](#network-setup).
+If capture fails three times in a row the add-on gives up:
+
+```
+[HEALTH] Packet capture will not stay up; restoring ARP and stopping so the add-on is
+not left redirecting traffic it cannot forward
+```
+
+It undoes the ARP redirection first, so your inverter goes straight back to talking to
+the real gateway, then exits with an error status. **This is where Watchdog matters** —
+with it enabled Supervisor restarts the add-on; with it disabled the add-on stays stopped
+until you start it.
+
+Capture that keeps dying usually means the interface went away. Check `SNIFF_IFACE` if
+you have pinned one, and see [Network setup](#network-setup).
+
+With `AUTO_INTERCEPT` off the message says the inverter's own path is unaffected, because
+in that mode the bridge only listens — nothing it does can interrupt your inverter.
 
 ### Every sensor reads Unknown
 
