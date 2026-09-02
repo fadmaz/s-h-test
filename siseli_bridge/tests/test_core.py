@@ -9,10 +9,15 @@ core itself -- patch there, never on config.
 """
 
 import json
+import logging
 import os
 import tempfile
+import threading
 import unittest
 from unittest import mock
+
+from scapy.all import ARP, AsyncSniffer  # type: ignore
+from scapy.error import Scapy_Exception  # type: ignore
 
 from src.siseli_bridge import core
 from src.siseli_bridge import mqtt as mqtt_mod
@@ -289,6 +294,162 @@ class TestPacketCallback(_CoreTestCase):
         ):
             core.packet_callback(self._cloud_packet())  # must not raise
         self.assertEqual(len(self.sent), 1, "forwarding still happens after a parse error")
+
+
+class TestDeadCaptureThread(_CoreTestCase):
+    """The capture thread can end with nothing noticing. The ARP spoofer poisons on
+    RUNNING alone and forwarding lives inside packet_callback, so a dead sniffer leaves
+    the inverter redirected at a bridge that no longer forwards -- its route to the
+    cloud gone, and the first symptom sensors going stale half an hour later,
+    indistinguishable from a quiet inverter.
+
+    Nothing local caught this before: the sniffer existed only under __main__, and the
+    smoke test ready marker prints whether or not the thread survives.
+    """
+
+    class _FakeSniffer:
+        def __init__(self, alive, exception=None):
+            self.exception = exception
+            self.thread = mock.Mock()
+            self.thread.is_alive.return_value = alive
+
+        def stop(self):
+            # What scapy raises on an already-dead sniffer; shutdown must swallow it.
+            raise Scapy_Exception("Not running ! (check .running attr)")
+
+    def setUp(self):
+        super().setUp()
+        core.CAPTURE_FAILURES = 0
+        shared_state.STOP_REQUESTED = False
+        self.addCleanup(setattr, core, "CAPTURE_FAILURES", 0)
+        self.addCleanup(setattr, shared_state, "STOP_REQUESTED", False)
+        patch = mock.patch("src.siseli_bridge.core.time.sleep")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _with(self, sniffer):
+        patch = mock.patch.object(core, "sniffer", sniffer)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    # -- liveness ---------------------------------------------------------------
+
+    def test_a_real_unstarted_sniffer_is_not_a_death(self):
+        """Against the real dependency rather than a fake: requirements.txt allows
+        scapy >=2.5,<2.7, and this pins that .thread stays None until start()."""
+        self._with(AsyncSniffer(filter="ip host 127.0.0.1", store=False))
+        self.assertFalse(core.capture_thread_is_dead())
+
+    def test_a_created_but_unstarted_thread_is_a_death(self):
+        """The one genuinely dangerous window: scapy assigns .thread inside start()
+        before calling thread.start(). health_logger sleeps first, which is why it has
+        never fired -- the guard must not depend on that timing."""
+        holder = self._FakeSniffer(alive=False)
+        holder.thread = threading.Thread(target=lambda: None)
+        self._with(holder)
+        self.assertTrue(core.capture_thread_is_dead())
+
+    def test_no_sniffer_yet_is_not_a_death(self):
+        self._with(None)
+        self.assertFalse(core.capture_thread_is_dead())
+
+    # -- restart ----------------------------------------------------------------
+
+    def test_a_dead_thread_is_restarted_in_place(self):
+        self._with(self._FakeSniffer(alive=False, exception=OSError("socket closed")))
+        with mock.patch.object(core, "restart_capture", return_value=True) as restarted:
+            acted = core.check_capture_thread()
+        self.assertTrue(acted)
+        restarted.assert_called_once()
+        self.assertFalse(
+            shared_state.STOP_REQUESTED, "a recoverable death must not stop the add-on"
+        )
+
+    def test_a_healthy_tick_forgives_an_earlier_death(self):
+        """Consecutive, so a rare transient does not accumulate toward the limit."""
+        core.CAPTURE_FAILURES = 2
+        self._with(self._FakeSniffer(alive=True))
+        self.assertFalse(core.check_capture_thread())
+        self.assertEqual(core.CAPTURE_FAILURES, 0)
+
+    def test_it_gives_up_after_the_limit_and_asks_the_main_thread_to_stop(self):
+        self._with(self._FakeSniffer(alive=False))
+        with mock.patch.object(core, "restart_capture", return_value=False):
+            for _ in range(core.CAPTURE_RESTART_LIMIT):
+                core.check_capture_thread()
+        self.assertTrue(shared_state.STOP_REQUESTED)
+
+    def test_it_never_calls_shutdown_itself(self):
+        """shutdown() spends a second in restore_arp. Run from this daemon thread it is
+        killed mid-restore the moment the main loop notices and falls through, which
+        truncates the one action that ends the blackhole."""
+        self._with(self._FakeSniffer(alive=False))
+        with mock.patch.object(core, "restart_capture", return_value=False), mock.patch.object(
+            core, "shutdown"
+        ) as stopped:
+            for _ in range(core.CAPTURE_RESTART_LIMIT):
+                core.check_capture_thread()
+        stopped.assert_not_called()
+        self.assertTrue(shared_state.RUNNING, "RUNNING must stay set so shutdown() still acts")
+
+    def test_a_stop_already_requested_is_not_re_reported(self):
+        self._with(self._FakeSniffer(alive=False))
+        shared_state.STOP_REQUESTED = True
+        self.assertFalse(core.check_capture_thread())
+
+    # -- what it says -----------------------------------------------------------
+
+    def test_the_log_names_the_cause_and_the_impact(self):
+        self._with(self._FakeSniffer(alive=False, exception=OSError("socket closed")))
+        with mock.patch.object(core, "restart_capture", return_value=True), mock.patch(
+            "src.siseli_bridge.core.log"
+        ) as logged:
+            core.check_capture_thread()
+        errors = [c for c in logged.call_args_list if c.kwargs.get("level") == "error"]
+        self.assertTrue(errors, "a dead capture thread must be reported at error level")
+        said = str(errors[0].args[0])
+        self.assertIn("socket closed", said)
+        self.assertIn("ARP-poisoned", said)
+
+    def test_a_passive_install_is_not_told_its_inverter_is_cut_off(self):
+        """With AUTO_INTERCEPT off the bridge never poisoned anything, so the inverter
+        path is untouched. Claiming otherwise sends the reader to their router."""
+        self._with(self._FakeSniffer(alive=False))
+        with mock.patch.object(core, "AUTO_INTERCEPT", False), mock.patch.object(
+            core, "restart_capture", return_value=True
+        ), mock.patch("src.siseli_bridge.core.log") as logged:
+            core.check_capture_thread()
+        said = " ".join(str(c.args[0]) for c in logged.call_args_list if c.args)
+        self.assertIn("unaffected", said)
+        self.assertNotIn("ARP-poisoned", said)
+
+    def test_the_scapy_warning_is_captured_when_there_is_no_exception(self):
+        """The usual death: scapy closes the socket, warns, and returns normally, so
+        .exception is None and that warning is the only account of the cause."""
+        core.SCAPY_WARNINGS.last = None
+        logging.getLogger("scapy.runtime").warning("Sniffing socket closed unexpectedly")
+        self.assertEqual(core.SCAPY_WARNINGS.last, "Sniffing socket closed unexpectedly")
+
+        self._with(self._FakeSniffer(alive=False, exception=None))
+        with mock.patch.object(core, "restart_capture", return_value=True), mock.patch(
+            "src.siseli_bridge.core.log"
+        ) as logged:
+            core.check_capture_thread()
+        said = " ".join(str(c.args[0]) for c in logged.call_args_list if c.args)
+        self.assertIn("Sniffing socket closed unexpectedly", said)
+
+    # -- the teardown it asks for -----------------------------------------------
+
+    def test_the_requested_stop_restores_both_peers_in_full(self):
+        """What the main thread does once it sees the request. Ten corrective frames,
+        each an ARP reply carrying the peers real MACs -- the same assertions
+        TestShutdown makes, because a truncated restore is the failure being avoided."""
+        self._with(self._FakeSniffer(alive=False))
+        with mock.patch.object(core, "publish_availability"), mock.patch.object(core, "client"):
+            core.shutdown()
+        self.assertEqual(len(self.sent), 10)
+        self.assertTrue(all(frame[ARP].op == 2 for frame in self.sent))
+        self.assertEqual({frame[ARP].hwsrc for frame in self.sent}, {INV_MAC, RTR_MAC})
 
 
 class TestShutdown(_CoreTestCase):

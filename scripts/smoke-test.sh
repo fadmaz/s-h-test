@@ -16,6 +16,8 @@ set -euo pipefail
 IMAGE="${IMAGE:-siseli-bridge:smoke}"
 CONTAINER="${CONTAINER:-siseli-smoke-$$}"
 TIMEOUT="${TIMEOUT:-60}"
+# Long enough to cover the first health-loop tick at T+10s.
+SETTLE="${SETTLE:-15}"
 READY_MARKER="[Bridge] Sniffer started"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,6 +64,23 @@ deadline=$(( SECONDS + TIMEOUT ))
 while (( SECONDS < deadline )); do
     if docker logs "$CONTAINER" 2>&1 | grep -qF "$READY_MARKER"; then
         echo "==> Started successfully"
+
+        # The marker prints unconditionally, whether or not the capture thread
+        # survived, so reaching it proves less than it looks. Since 2.6.20 the health
+        # loop stops the add-on when capture will not stay up -- which means a bug in
+        # that check could stop a perfectly healthy add-on, and this script would have
+        # exited seconds earlier none the wiser. The first health tick is at T+10s.
+        echo "==> Confirming it is still running ${SETTLE}s later"
+        sleep "$SETTLE"
+        status="$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo missing)"
+        if [[ "$status" != "running" ]]; then
+            code="$(docker inspect -f '{{.State.ExitCode}}' "$CONTAINER" 2>/dev/null || echo '?')"
+            echo "!!! Container stopped itself after starting (status=$status, code=$code)" >&2
+            echo "--- container output ---" >&2
+            docker logs "$CONTAINER" 2>&1 | tail -40 >&2
+            exit 1
+        fi
+
         echo "--- container output ---"
         docker logs "$CONTAINER" 2>&1 | grep -vE '^\s*$' | tail -20
         exit 0
