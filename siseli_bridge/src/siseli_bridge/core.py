@@ -462,12 +462,67 @@ def availability_watchdog_tick(now: Optional[float] = None) -> Optional[bool]:
     return fresh
 
 
+def capture_thread_is_dead() -> bool:
+    """True once the scapy capture thread has ended while the bridge still thinks it
+    is running.
+
+    Read from the thread object rather than from AsyncSniffer.running or .exception,
+    because neither is reliable for this. scapy wraps the sniff loop in a try/except
+    that stores an exception on the instance, so .exception is None whenever _run
+    simply returns -- which is what a closed capture socket produces -- and .running is
+    cleared on that path too, indistinguishably from a deliberate stop. Thread liveness
+    covers both endings and needs no assumption about which one happened.
+
+    Nothing noticed this before. The ARP spoofer poisons on _state.RUNNING alone, and
+    forwarding lives inside packet_callback, so a dead capture thread left both peers
+    pointed at a bridge that no longer forwards: the inverter lost its route to the
+    cloud entirely, and the only symptom was sensors going stale half an hour later.
+    """
+    if sniffer is None:
+        return False
+    thread = getattr(sniffer, "thread", None)
+    if thread is None:
+        return False
+    return not thread.is_alive()
+
+
+def check_capture_thread() -> bool:
+    """Stop the bridge if the capture thread has died. True when it acted.
+
+    Shutting down is the correct response rather than a restart in place. shutdown()
+    restores both ARP caches, which ends the blackhole immediately -- that is the
+    damage. A silent in-process retry would leave the peers poisoned while it tried,
+    and a persistent fault would loop invisibly. Exiting is loud, and with Supervisor's
+    Watchdog enabled the add-on comes straight back.
+    """
+    if not _state.RUNNING or not capture_thread_is_dead():
+        return False
+
+    reason = getattr(sniffer, "exception", None)
+    log(
+        "[HEALTH] Capture thread has died; the inverter is still ARP-poisoned toward a "
+        "bridge that cannot forward. Restoring ARP and stopping so Supervisor can "
+        f"restart the add-on. cause={reason!r}",
+        level="error",
+    )
+    shutdown()
+    return True
+
+
 def health_logger() -> None:
     ticks = 0
     while _state.RUNNING:
         # Ten seconds so availability reacts promptly; the health line still prints
         # every 30 so log volume is unchanged.
         time.sleep(10)
+        try:
+            # Before availability: a dead capture thread is the cause of the staleness
+            # the watchdog would otherwise report as a quiet inverter.
+            if check_capture_thread():
+                return
+        except Exception as exc:
+            log(f"[HEALTH ERROR] {exc}", level="error")
+
         try:
             availability_watchdog_tick()
         except Exception as exc:

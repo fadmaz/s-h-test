@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.20] - 2026-09-02
+
+### Fixed
+
+- **A dead packet-capture thread is no longer silent.** If the scapy capture thread ended
+  — a closed capture socket, an interface going away — nothing noticed. The ARP spoofer
+  kept poisoning on its own flag and forwarding lives inside the capture callback, so the
+  inverter stayed redirected at a bridge that no longer forwarded and **lost its route to
+  the vendor cloud entirely**. The first symptom was sensors going stale up to half an hour
+  later, indistinguishable from a quiet inverter.
+
+  The health loop now checks capture-thread liveness every 10 s. When it has died the
+  add-on logs the cause at error level, **restores both ARP caches** so the inverter goes
+  straight back to the real gateway, and stops — which is why Watchdog is worth enabling,
+  since Supervisor then restarts it within seconds.
+
+  Liveness is read from the thread object rather than scapy's `running` or `exception`
+  attributes: `exception` is `None` whenever the sniff loop simply returns, which is what a
+  closed socket produces, and `running` is cleared on that path indistinguishably from a
+  deliberate stop.
+
 ## [2.6.19] - 2026-09-02
 
 ### Fixed

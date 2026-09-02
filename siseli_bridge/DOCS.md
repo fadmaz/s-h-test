@@ -299,6 +299,26 @@ Assistant host yourself. This works only if all three hold:
 
 ## Troubleshooting
 
+### The add-on stopped itself, saying the capture thread died
+
+```
+[HEALTH] Capture thread has died; the inverter is still ARP-poisoned toward a bridge
+that cannot forward. Restoring ARP and stopping so Supervisor can restart the add-on.
+```
+
+The packet capture ended while the add-on was still redirecting your inverter's traffic
+through it. Left alone that is the worst state the bridge can be in — your inverter would
+keep sending to a bridge that no longer forwards, losing its connection to the vendor
+cloud entirely, and the only sign would be sensors going stale much later.
+
+So the add-on undoes the redirection and stops, which is why **Watchdog** matters: with it
+enabled Supervisor restarts the add-on immediately and the gap is seconds. With it
+disabled the add-on stays stopped until you start it yourself.
+
+If it recurs, the `cause=` value in that line is the underlying error. A capture that dies
+repeatedly usually means the interface went away — check `SNIFF_IFACE` if you have pinned
+one, and see [Network setup](#network-setup).
+
 ### Every sensor reads Unknown
 
 Not a few sensors — *all* of them, right from the first start. That means the bridge is

@@ -291,6 +291,72 @@ class TestPacketCallback(_CoreTestCase):
         self.assertEqual(len(self.sent), 1, "forwarding still happens after a parse error")
 
 
+class TestDeadCaptureThreadIsFatal(_CoreTestCase):
+    """The capture thread can end without anything noticing. The ARP spoofer poisons on
+    _state.RUNNING alone and forwarding lives inside packet_callback, so a dead sniffer
+    leaves both peers pointed at a bridge that no longer forwards -- the inverter loses
+    its route to the cloud entirely, and the first symptom is sensors going stale up to
+    half an hour later, blamed on a quiet inverter.
+
+    Nothing local could catch this before: the sniffer only exists under __main__, and
+    the smoke test's ready marker is the same log line that prints whether or not the
+    thread survives.
+    """
+
+    class _FakeSniffer:
+        def __init__(self, alive, exception=None):
+            self.exception = exception
+            self.thread = mock.Mock()
+            self.thread.is_alive.return_value = alive
+
+    def _with(self, sniffer):
+        patch = mock.patch.object(core, "sniffer", sniffer)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_dead_thread_stops_the_bridge_and_restores_arp(self):
+        self._with(self._FakeSniffer(alive=False, exception=OSError("capture socket closed")))
+        with mock.patch.object(core, "shutdown") as stopped:
+            acted = core.check_capture_thread()
+        self.assertTrue(acted)
+        stopped.assert_called_once()
+
+    def test_the_real_shutdown_path_restores_both_peers(self):
+        """Not just that shutdown is called -- that calling it actually un-poisons. The
+        blackhole is the damage, and restore_arp is what ends it."""
+        self._with(self._FakeSniffer(alive=False))
+        with mock.patch.object(core, "publish_availability"), mock.patch.object(core, "client"):
+            core.check_capture_thread()
+        self.assertGreaterEqual(len(self.sent), 2, "no corrective ARP frames were sent")
+        self.assertFalse(shared_state.RUNNING)
+
+    def test_a_live_thread_is_left_alone(self):
+        self._with(self._FakeSniffer(alive=True))
+        with mock.patch.object(core, "shutdown") as stopped:
+            self.assertFalse(core.check_capture_thread())
+        stopped.assert_not_called()
+
+    def test_startup_before_the_sniffer_exists_is_not_a_death(self):
+        """core.sniffer is None until __main__ builds it, and the thread attribute is
+        None until start(). Neither is a dead capture thread."""
+        self._with(None)
+        self.assertFalse(core.capture_thread_is_dead())
+
+        unstarted = self._FakeSniffer(alive=False)
+        unstarted.thread = None
+        self._with(unstarted)
+        self.assertFalse(core.capture_thread_is_dead())
+
+    def test_it_does_nothing_once_the_bridge_is_already_stopping(self):
+        """shutdown() sets RUNNING False before stopping the sniffer, so the thread is
+        legitimately dead during a normal stop and must not be reported as a fault."""
+        self._with(self._FakeSniffer(alive=False))
+        shared_state.RUNNING = False
+        with mock.patch.object(core, "shutdown") as stopped:
+            self.assertFalse(core.check_capture_thread())
+        stopped.assert_not_called()
+
+
 class TestShutdown(_CoreTestCase):
     def test_marks_offline_disconnects_and_is_idempotent(self):
         client = FakeMqttClient()
