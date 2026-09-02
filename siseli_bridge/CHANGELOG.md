@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.19] - 2026-09-02
+
+### Fixed
+
+- **A system clock step no longer fabricates kWh.** Every duration the add-on measures
+  now comes from `time.monotonic()` instead of the wall clock. A Raspberry Pi has no RTC,
+  so it boots with a wrong clock and NTP steps it — routine on the reference platform, and
+  previously indistinguishable from elapsed time. The existing clamp bounded the damage at
+  `ENERGY_MAX_DT_SEC` but did not prevent it: one step credited up to 1200 s of the current
+  power into five `total_increasing` counters, which is **1.67 kWh at 5 kW** that could
+  never come back down. A monotonic clock cannot see the step at all.
+- **The startup grace no longer presents a restored cache as live data for half an hour.**
+  When no payload had been decoded yet, availability was granted for the full
+  `TELEMETRY_TIMEOUT_SEC` — 1800 s by default, and 3600 s reachable. It now has its own
+  bound, `STARTUP_GRACE_SEC`, defaulting to **1200 s**. That bounds process start to first
+  *decoded* payload, which is structurally larger than the gap between payloads: the
+  inverter's connection to the cloud is long-lived, so a restarted bridge always joins
+  mid-stream and discards until a frame boundary, costing the payload in progress. The
+  worst case composes as the 15 s ARP wait plus one payload lost to that join plus one
+  full 600 s gap — the largest ever measured. The unavailable log now names whichever
+  bound actually fired, rather than always printing the telemetry timeout.
+
 ## [Unreleased]
 
 ### Fixed

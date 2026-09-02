@@ -25,7 +25,8 @@ STATE_LOCK = threading.RLock()
 #: value, so core.shutdown() rebound only its own copy and mqtt's stayed True forever.
 RUNNING: bool = True
 
-#: Wall-clock time of the last *successfully parsed telemetry payload*. This is the
+#: time.monotonic() reading at the last *successfully parsed telemetry payload*. It is
+#: meaningless across a process boundary and must never be persisted. This is the
 #: only trustworthy liveness signal: core's LAST_PACKET_TS is set for any packet
 #: matching the capture filter, bare ACKs included, so it stays fresh long after the
 #: cloud stream has stopped carrying data.
@@ -65,7 +66,7 @@ def observed_telemetry_interval() -> float:
 def record_telemetry(now: Optional[float] = None) -> None:
     """Stamp a decoded payload and remember the gap since the previous one."""
     global LAST_TELEMETRY_TS
-    now = now if now is not None else time.time()
+    now = now if now is not None else time.monotonic()
     previous = LAST_TELEMETRY_TS
     if previous and now > previous:
         TELEMETRY_INTERVALS.append(now - previous)

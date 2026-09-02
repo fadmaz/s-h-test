@@ -11,6 +11,7 @@ Fixtures are real captures from two devices -- see tests/captures.py.
 
 import inspect
 import os
+import pathlib
 import re
 import tempfile
 import unittest
@@ -574,6 +575,76 @@ class TestLiveCaptureParity(_ParserTestCase):
                 self.assertEqual(state.get(key), expected)
 
 
+class TestEnergyIsImmuneToAClockStep(unittest.TestCase):
+    """A Raspberry Pi has no RTC. It boots with a wrong clock and NTP steps it, which
+    is routine on the reference platform -- and the integrator used to measure its
+    interval on the wall clock, so a step was indistinguishable from elapsed time.
+
+    _energy_max_dt bounded the damage at ENERGY_MAX_DT_SEC but did not prevent it: a
+    step credited up to 1200 s of the current power into five total_increasing counters,
+    which round(max(previous, total)) makes permanent. At 5 kW that is 1.67 kWh that can
+    never come back down. Durations are measured on time.monotonic() now, so the step
+    cannot be seen at all.
+    """
+
+    def setUp(self):
+        self._ctx = isolated_state()
+        self._ctx.__enter__()
+        self.addCleanup(lambda: self._ctx.__exit__(None, None, None))
+        parser_module.LAST_ENERGY_TS.clear()
+
+    def test_a_wall_clock_jump_credits_nothing(self):
+        with mock.patch.object(parser_module.time, "monotonic", return_value=1000.0):
+            SolarParser._apply_energy_dashboard_calculations({"c_load_w": 5000})
+
+        # Wall clock leaps four hours; the monotonic clock advances a normal interval.
+        state = {"c_load_w": 5000}
+        with mock.patch.object(parser_module.time, "time", return_value=1e9), mock.patch.object(
+            parser_module.time, "monotonic", return_value=1300.0
+        ):
+            SolarParser._apply_energy_dashboard_calculations(state)
+
+        expected = 5000 * 300 / 3_600_000.0
+        self.assertAlmostEqual(state["c_load_energy_kwh"], expected, places=5)
+        self.assertLess(
+            state["c_load_energy_kwh"], 0.5, "a clock step is being credited as elapsed time"
+        )
+
+    def test_the_integrator_reads_the_monotonic_clock(self):
+        """Pins the clock source itself. Measuring durations on the wall clock is the
+        defect, and it is invisible in behaviour until a step happens."""
+        seen = []
+        with mock.patch.object(
+            parser_module.time, "monotonic", side_effect=lambda: seen.append(1) or 500.0
+        ):
+            SolarParser._apply_energy_dashboard_calculations({"c_load_w": 100})
+        self.assertTrue(seen, "the energy path no longer consults the monotonic clock")
+
+
+class TestNoModuleMeasuresADurationOnTheWallClock(unittest.TestCase):
+    """A source pin, because a partial migration is invisible in behaviour until a
+    clock steps -- and the whole suite would still pass. Moving record_telemetry to
+    monotonic while telemetry_is_fresh stayed on the wall clock would make now - last
+    about 1.7e9 and read every entity Unavailable forever."""
+
+    SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "siseli_bridge"
+
+    def test_no_runtime_module_calls_time_time(self):
+        for name in ("core.py", "parsers.py", "state.py", "mqtt.py"):
+            with self.subTest(module=name):
+                text = (self.SRC / name).read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "time.time()",
+                    text,
+                    f"{name} measures a duration on a clock that can step; use time.monotonic()",
+                )
+
+    def test_the_human_readable_timestamp_is_still_a_wall_clock(self):
+        """The one correct wall-clock use: the time a person reads in the log."""
+        text = (self.SRC / "parsers.py").read_text(encoding="utf-8")
+        self.assertIn("datetime.now().strftime", text)
+
+
 class TestPublishThrottle(unittest.TestCase):
     """UPDATE_INTERVAL_SEC never suppressed a publish: the gate was
     `changed or interval elapsed`, and something always changed."""
@@ -610,13 +681,13 @@ class TestPublishThrottle(unittest.TestCase):
 
     def test_a_change_inside_the_window_is_deferred_not_dropped(self):
         parser_module.LAST_PUBLISH_TS = 1000.0
-        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "time", return_value=1002.0):
+        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "monotonic", return_value=1002.0):
             SolarParser.parse_payload(self._payload(58))
             SolarParser.parse_payload(self._payload(59))
         self.publish_state.assert_not_called()
         self.assertTrue(parser_module.PENDING_PUBLISH, "the change must be remembered")
 
-        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "time", return_value=1011.0):
+        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "monotonic", return_value=1011.0):
             SolarParser.parse_payload(self._payload(60))
         self.publish_state.assert_called_once()
         self.assertFalse(parser_module.PENDING_PUBLISH)
@@ -625,14 +696,14 @@ class TestPublishThrottle(unittest.TestCase):
         """Without this, a steady inverter publishes nothing and expire_after marks
         every entity unavailable."""
         parser_module.LAST_PUBLISH_TS = 1000.0
-        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "time", return_value=1000.0):
+        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "monotonic", return_value=1000.0):
             SolarParser.parse_payload(self._payload(58))
         self.publish_state.reset_mock()
         parser_module.PENDING_PUBLISH = False
         parser_module.LAST_PUBLISH_TS = 1000.0
 
         # Same values again, one full heartbeat interval later (600 // 3 = 200 s).
-        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "time", return_value=1201.0):
+        with mock.patch.object(parser_module, "UPDATE_INTERVAL_SEC", 10),              mock.patch.object(parser_module, "EXPIRE_AFTER_SEC", 600),              mock.patch.object(parser_module.time, "monotonic", return_value=1201.0):
             SolarParser.parse_payload(self._payload(58))
         self.publish_state.assert_called_once()
 

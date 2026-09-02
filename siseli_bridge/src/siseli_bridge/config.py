@@ -81,7 +81,31 @@ TELEMETRY_TIMEOUT_SEC = int(os.getenv("TELEMETRY_TIMEOUT_SEC", "1800"))
 TELEMETRY_TIMEOUT_MULTIPLIER = float(os.getenv("TELEMETRY_TIMEOUT_MULTIPLIER", "3"))
 TELEMETRY_TIMEOUT_CEILING_SEC = int(os.getenv("TELEMETRY_TIMEOUT_CEILING_SEC", "3600"))
 
-# Largest interval the energy integrator will credit in one step. Its job is to stop a
+# How long after process start the sensors stay available before any payload has been
+# decoded. Separate from TELEMETRY_TIMEOUT_SEC, which it used to borrow: the grace was
+# the full 1800 s timeout, so a restart on an install whose inverter had gone quiet
+# presented the previous run's cached values as current for half an hour.
+#
+# This bounds process start -> first DECODED payload, which is structurally larger than
+# the gap between payloads: the inverter's connection to the cloud is long-lived, so a
+# restarted bridge always joins mid-stream, builds a fresh TcpFlowState and discards
+# until a frame boundary -- costing the payload in progress. A real 2.6.15 restart log
+# shows exactly that, joining on a PINGREQ and taking several health ticks to decode.
+#
+# So the worst case composes: the 15 s ARP wait, plus one payload lost to the mid-stream
+# join, plus one full gap at the measured 600 s worst case. 1200 s is the smallest value
+# that cannot flap on the cadence actually measured; 600 would bet that the mid-stream
+# join never costs a payload, on the one path where it structurally does.
+#
+# Still an inference from a related measurement. Nobody has timed process start to first
+# payload across restarts; do that and this can come down. Same env-only treatment and
+# the same reason as its two neighbours above.
+STARTUP_GRACE_SEC = int(os.getenv("STARTUP_GRACE_SEC", "1200"))
+
+# Largest interval the energy integrator will credit in one step. Since 2.6.19 durations
+# are measured on time.monotonic(), so a clock step cannot reach the integrator at all;
+# what remains for this to bound is a genuinely long real gap -- a wedged stream, or a
+# process that stopped being scheduled. Its job is to stop a
 # clock jump or a suspended process dumping a fabricated block of kWh -- NOT to bound
 # normal operation. It was previously derived from UPDATE_INTERVAL_SEC, which is an
 # MQTT publish throttle and has nothing to do with how often the inverter reports:

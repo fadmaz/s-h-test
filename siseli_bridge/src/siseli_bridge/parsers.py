@@ -69,11 +69,11 @@ class TcpFlowState:
         self.pending_bytes = 0
         self.stream = bytearray()
         #: Last activity of any kind. Drives eviction of dead flows.
-        self.last_seen = time.time()
+        self.last_seen = time.monotonic()
         #: Last time next_seq actually advanced. Drives the stale reset -- using
         #: last_seen for that meant a flow wedged behind a missing segment kept
         #: itself alive forever, because parking a segment counts as activity.
-        self.last_progress = time.time()
+        self.last_progress = time.monotonic()
         #: When the current gap started, or None if there is no gap.
         self.gap_since: Optional[float] = None
 
@@ -82,7 +82,7 @@ class TcpFlowState:
         self.pending.clear()
         self.pending_bytes = 0
         self.stream.clear()
-        now = time.time()
+        now = time.monotonic()
         self.last_seen = now
         self.last_progress = now
         self.gap_since = None
@@ -137,7 +137,8 @@ _CHECKSUM_TAIL_BYTES = 2
 
 #: One-shot guard so a foreign device is diagnosed once, not on every payload.
 UNSUPPORTED_PROTOCOL_LOGGED = False
-#: Integration clock per energy domain. A dict rather than one global per domain, so
+#: Integration clock per energy domain, holding time.monotonic() readings -- which are
+#: meaningless across a process boundary and must never be persisted. A dict rather than one global per domain, so
 #: adding a calculated energy counter does not need a new module-level name -- and so
 #: the test isolation helper has one thing to save instead of a growing list.
 LAST_ENERGY_TS: Dict[str, float] = {}
@@ -147,7 +148,7 @@ _FLOW_EVICT_INTERVAL: int = 200  # Prune stale TCP flows every N state lookups.
 
 def _evict_stale_flows() -> None:
     """Remove FLOW_STATES entries inactive for longer than STREAM_STALE_SECONDS."""
-    now = time.time()
+    now = time.monotonic()
     stale = [k for k, v in FLOW_STATES.items() if now - v.last_seen > STREAM_STALE_SECONDS]
     for k in stale:
         del FLOW_STATES[k]
@@ -455,7 +456,7 @@ def extract_publish_payload(packet: bytes) -> Tuple[Optional[str], Optional[byte
 def get_flow_state(flow_key: Tuple[str, int, str, int]) -> TcpFlowState:
     global _FLOW_EVICT_COUNTER
     state = FLOW_STATES.get(flow_key)
-    now = time.time()
+    now = time.monotonic()
 
     _FLOW_EVICT_COUNTER += 1
     if _FLOW_EVICT_COUNTER >= _FLOW_EVICT_INTERVAL:
@@ -508,7 +509,7 @@ def _resync_flow(state: TcpFlowState, flow_key: Tuple[str, int, str, int], reaso
     if state.pending:
         state.next_seq = min(state.pending)
     state.gap_since = None
-    state.last_progress = time.time()
+    state.last_progress = time.monotonic()
 
 
 def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: bytes) -> List[bytes]:
@@ -538,7 +539,7 @@ def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: b
         seq = state.next_seq
 
     if seq_gt(seq, state.next_seq):
-        now = time.time()
+        now = time.monotonic()
         if seq not in state.pending:
             state.pending[seq] = payload
             state.pending_bytes += len(payload)
@@ -574,7 +575,7 @@ def append_stream_data(flow_key: Tuple[str, int, str, int], seq: int, payload: b
         state.stream.extend(pending_payload)
         state.next_seq = (state.next_seq + len(pending_payload)) % SEQ_MOD
 
-    state.last_progress = time.time()
+    state.last_progress = time.monotonic()
     if not state.pending:
         state.gap_since = None
 
@@ -603,7 +604,7 @@ def heartbeat_due(now: Optional[float] = None) -> bool:
     """
     if not EXPIRE_AFTER_SEC:
         return False
-    now = now if now is not None else time.time()
+    now = now if now is not None else time.monotonic()
     interval = max(UPDATE_INTERVAL_SEC, EXPIRE_AFTER_SEC // 3)
     return (now - LAST_PUBLISH_TS) >= interval
 
@@ -618,7 +619,7 @@ def republish_state(now: Optional[float] = None) -> bool:
         return False
     _, publish_grouped_state = _get_mqtt_publish()
     publish_grouped_state(snapshot)
-    LAST_PUBLISH_TS = now if now is not None else time.time()
+    LAST_PUBLISH_TS = now if now is not None else time.monotonic()
     PENDING_PUBLISH = False
     return True
 
@@ -631,7 +632,7 @@ def _write_state_cache(snapshot: Dict[str, object], now: Optional[float] = None)
     replaces -- a slow flush stalls libpcap and drops segments.
     """
     global LAST_CACHE_WRITE_TS
-    now = now if now is not None else time.time()
+    now = now if now is not None else time.monotonic()
     if LAST_CACHE_WRITE_TS and (now - LAST_CACHE_WRITE_TS) < STATE_CACHE_INTERVAL_SEC:
         return False
     try:
@@ -721,8 +722,10 @@ class SolarParser:
     def _energy_max_dt() -> float:
         """Largest interval the integrator will credit in one step.
 
-        Guards against a clock jump or a suspended process crediting a fabricated
-        block of kWh. It must sit *above* normal operation: derived from
+        Guards against a genuinely long real gap -- a wedged stream, or a process that
+        stopped being scheduled -- crediting a fabricated block of kWh. A clock jump is
+        no longer among them: since 2.6.19 the interval is measured on time.monotonic()
+        and a wall-clock step cannot reach this function. It must sit *above* normal operation: derived from
         UPDATE_INTERVAL_SEC it evaluated to 60 s against a measured 300 s cadence, so
         it truncated every interval and the counters accrued a fifth of the real
         energy. Floored on observed cadence for the same reason the availability
@@ -821,7 +824,7 @@ class SolarParser:
         if factor <= 0:
             factor = 1.0
 
-        now = now_ts if now_ts is not None else time.time()
+        now = now_ts if now_ts is not None else time.monotonic()
 
         battery_keys = (
             "bat_v",
@@ -2078,7 +2081,7 @@ class SolarParser:
                             publish_sensor_discovery(key)
 
                     global LAST_PUBLISH_TS, PENDING_PUBLISH
-                    now = time.time()
+                    now = time.monotonic()
                     if changed_keys:
                         PENDING_PUBLISH = True
 
