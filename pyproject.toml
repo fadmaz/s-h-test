@@ -7,18 +7,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "siseli-bridge"
-dynamic = ["version"]
+# dependencies is dynamic so the runtime pins live in exactly one file. They used to
+# be listed here AND in siseli_bridge/requirements.txt, held equal by a test --
+# but Dependabot raises one PR per ecosystem+directory, so it could only ever bump
+# one copy at a time and every dependency PR it opened failed that test by
+# construction. requirements.txt wins because it is the file that ships in the image.
+dynamic = ["version", "dependencies"]
 requires-python = ">=3.9"
 license = "MIT"
 # Named explicitly, and NOTICE is named with it: setting this key at all narrows
 # setuptools' default glob, so ["LICENSE"] alone would silently drop the file that
 # records the upstream project's unlicensed status.
 license-files = ["LICENSE", "NOTICE"]
-dependencies = [
-    "paho-mqtt>=1.6,<2.0",
-    "scapy>=2.5,<2.7",
-]
-
 [project.optional-dependencies]
 dev = [
     "pytest>=7",
@@ -37,6 +37,7 @@ packages = ["src", "src.siseli_bridge"]
 
 [tool.setuptools.dynamic]
 version = { attr = "src.siseli_bridge.version.__version__" }
+dependencies = { file = ["siseli_bridge/requirements.txt"] }
 
 [tool.pytest.ini_options]
 testpaths = ["siseli_bridge/tests"]

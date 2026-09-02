@@ -454,37 +454,56 @@ class TestPinsAgree(unittest.TestCase):
     the copies agreed. Dependabot raises one PR per location, so a half-landed bump is
     the realistic failure -- and in both cases below it is the *second* copy that ships."""
 
-    def test_python_dependencies_match(self):
-        """requirements.txt is installed into the image; pyproject.toml is what CI
-        installs. A drift between them means CI tests a pin set no user runs."""
-        declared = re.search(
-            r"^dependencies\s*=\s*\[(.*?)\]", (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.S | re.M
-        )
-        self.assertIsNotNone(declared, "pyproject.toml declares no [project] dependencies")
-        project = sorted(re.findall(r'"([^"]+)"', declared.group(1)))
+    def test_the_runtime_pins_live_in_one_file(self):
+        """requirements.txt is the only place the runtime pins are written.
 
-        runtime = sorted(
+        They used to be listed in pyproject.toml as well, with a test asserting the two
+        were equal. That test was correct and still unmergeable: Dependabot raises one
+        PR per ecosystem and directory, so it could only ever bump one copy, and every
+        dependency PR it opened failed by construction against a branch-protected main.
+        Single-sourcing removes the class rather than relaxing the check.
+        """
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertRegex(
+            pyproject,
+            r'dynamic\s*=\s*\[[^\]]*"dependencies"',
+            "pyproject.toml must take its dependencies dynamically",
+        )
+        self.assertRegex(
+            pyproject,
+            r'dependencies\s*=\s*\{\s*file\s*=\s*\[\s*"siseli_bridge/requirements.txt"',
+            "the dynamic source must be the file that ships in the image",
+        )
+        self.assertNotRegex(
+            pyproject,
+            r"(?m)^dependencies\s*=\s*\[",
+            "a static dependency list is back, and Dependabot cannot keep two copies in step",
+        )
+        runtime = [
             line.strip()
             for line in (ADDON / "requirements.txt").read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
-        )
-        self.assertEqual(project, runtime)
+        ]
+        self.assertTrue(runtime, "requirements.txt is now the sole source and must not be empty")
 
-    def test_the_base_image_pin_matches(self):
-        """Dependabot's docker ecosystem bumps the Dockerfile and cannot see the shell
-        script, so the smoke test would keep building against the superseded base --
-        testing an image no user would get."""
+    def test_the_base_image_pin_lives_in_one_file(self):
+        """Same shape, same reason: Dependabot's docker ecosystem bumps the Dockerfile
+        and cannot see a shell script, so smoke-test.sh reads the pin rather than
+        restating it."""
         dockerfile = re.search(
             r"^ARG BUILD_FROM=(\S+)", (ADDON / "Dockerfile").read_text(encoding="utf-8"), re.M
         )
-        smoke = re.search(
-            r'^BUILD_FROM="\$\{BUILD_FROM:-(\S+?)\}"',
-            (ROOT / "scripts" / "smoke-test.sh").read_text(encoding="utf-8"),
-            re.M,
-        )
         self.assertIsNotNone(dockerfile, "Dockerfile declares no ARG BUILD_FROM default")
-        self.assertIsNotNone(smoke, "smoke-test.sh declares no BUILD_FROM default")
-        self.assertEqual(dockerfile.group(1), smoke.group(1))
+
+        smoke = (ROOT / "scripts" / "smoke-test.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            "ARG BUILD_FROM=", smoke, "smoke-test.sh must read the pin out of the Dockerfile"
+        )
+        self.assertNotIn(
+            dockerfile.group(1),
+            smoke,
+            "smoke-test.sh restates the base image pin instead of reading it",
+        )
 
 
 class TestDeprecatedOptions(unittest.TestCase):
